@@ -15,38 +15,81 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-This repository is under active development. Initial release scope is focused on:
+**Current version: v0.1 (unreleased)** — Core audit middleware with in-memory sink for testing.
 
-- FastAPI middleware that emits events conforming to bh-audit-schema v1.0
-- PHI-safe defaults (no request/response bodies)
-- Pluggable sinks (starting with JSONL and SQL databases)
+### v0.1 (current)
+- ✅ FastAPI middleware that emits events conforming to bh-audit-schema v1.0
+- ✅ PHI-safe defaults (no request/response bodies logged)
+- ✅ Captures: service, actor, action, resource, outcome, correlation
+- ✅ In-memory sink for testing (`MemorySink`)
+
+### Planned
+- Pluggable sinks (JSONL file, SQL databases)
+- Schema validation
+- PHI redaction utilities
 
 The bh-audit-schema v1.0 JSON schema is vendored into this package for offline validation.
 
-## Quickstart (planned API)
+## Quickstart
 
 ```python
 from fastapi import FastAPI
-from bh_fastapi_audit import AuditMiddleware
-from bh_fastapi_audit.sinks import JsonlFileSink
+from bh_fastapi_audit import AuditMiddleware, AuditConfig, MemorySink
 
 app = FastAPI()
 
-app.add_middleware(
-    AuditMiddleware,
+# For testing/development - use MemorySink
+sink = MemorySink()
+config = AuditConfig(
     service_name="example-bh-api",
-    sink=JsonlFileSink(path="./audit.jsonl"),
+    service_environment="dev",
 )
+
+app.add_middleware(AuditMiddleware, sink=sink, config=config)
+
+@app.get("/patients/{patient_id}")
+def get_patient(patient_id: str):
+    return {"patient_id": patient_id}
 ```
+
+Each request emits an audit event like:
+
+```json
+{
+  "schema_version": "1.0",
+  "event_id": "c1d2e3f4-1111-2222-3333-444455556666",
+  "timestamp": "2026-01-14T22:00:00Z",
+  "service": { "name": "example-bh-api", "environment": "dev" },
+  "actor": { "subject_id": "unknown", "subject_type": "service" },
+  "action": { "type": "READ", "data_classification": "UNKNOWN" },
+  "resource": { "type": "get_patient" },
+  "http": { "method": "GET", "route_template": "/patients/{patient_id}", "status_code": 200 },
+  "outcome": { "status": "SUCCESS" }
+}
+```
+
+## Configuration
+
+`AuditConfig` supports:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `service_name` | (required) | Name of the service emitting events |
+| `service_environment` | `"unknown"` | Environment (prod, staging, dev) |
+| `service_version` | `None` | Service version string |
+| `default_actor_id` | `"unknown"` | Default actor when no auth context |
+| `default_actor_type` | `"service"` | Default actor type (`"human"` or `"service"`) |
+| `get_actor` | `None` | Callback `(Request) -> dict` for custom actor extraction |
+| `get_resource` | `None` | Callback `(Request, Response) -> dict` for custom resource extraction |
+| `excluded_paths` | `{"/health", "/healthz", "/ready"}` | Paths to skip auditing |
 
 ## PHI-safe defaults
 
 This library is designed to be safe by default:
 
 - Does not log request or response bodies
-- Uses route templates instead of raw paths when possible
-- Sanitizes error messages before emitting audit events
-- Allows only explicitly safe metadata
+- Uses route templates instead of raw paths (avoids leaking IDs in URLs)
+- Only captures allowlisted headers (correlation IDs, not auth tokens)
 
 ## Scope and non-goals
 
@@ -61,13 +104,18 @@ This library is designed to be safe by default:
 - Storing raw PHI or clinical content in logs
 - Opinionated IAM or authentication frameworks
 
-## Installation (planned)
-
-The package will be published to PyPI once the initial v0.1 middleware and sinks are complete.
+## Installation
 
 ```bash
-pip install bh-fastapi-audit
+# From source (development)
+git clone https://github.com/bh-healthcare/bh-fastapi-audit
+cd bh-fastapi-audit
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
 ```
+
+PyPI publication planned for v0.2 when sinks are production-ready.
 
 ## License
 

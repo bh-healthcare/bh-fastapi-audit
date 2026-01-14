@@ -5,13 +5,15 @@ This package provides middleware for emitting structured audit events
 conforming to the bh-audit-schema standard for behavioral healthcare systems.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
 
-# Planned exports (not yet implemented):
-# from bh_fastapi_audit.middleware import AuditMiddleware
-# from bh_fastapi_audit.event import AuditEvent
+from bh_fastapi_audit.middleware import AuditConfig, AuditMiddleware
+from bh_fastapi_audit.sinks import AuditSink, MemorySink
 
 __all__ = [
     "__version__",
+    "AuditConfig",
+    "AuditMiddleware",
+    "AuditSink",
+    "MemorySink",
 ]
-
