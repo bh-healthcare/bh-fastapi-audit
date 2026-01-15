@@ -21,14 +21,17 @@ This project is an implementation layer that turns the bh-audit-schema standard 
 - FastAPI middleware that emits events conforming to bh-audit-schema v1.0
 - PHI-safe defaults (no bodies, safe headers only, error sanitization)
 - Captures: service, actor, action, resource, outcome, correlation
-- In-memory sink for testing (`MemorySink`)
+- Pluggable sinks:
+  - `MemorySink` — in-memory for testing
+  - `JsonlFileSink` — JSON Lines file for local dev and demos
+  - `SQLAlchemySink` — relational database storage (Postgres, SQLite, etc., via SQLAlchemy Core)
 - Redaction utilities for error message sanitization
 
 ### Planned
-- Pluggable sinks (JSONL file, SQL databases)
 - Schema validation for emitted events
+- Non-blocking / async sink variants (optional)
 
-The bh-audit-schema v1.0 JSON schema is vendored into this package for offline validation.
+The bh-audit-schema v1.0 JSON schema is vendored into this package to enable offline validation.
 
 ## Quickstart
 
@@ -67,6 +70,50 @@ Each request emits an audit event like:
   "outcome": { "status": "SUCCESS" }
 }
 ```
+
+## Sinks
+
+Sinks determine where audit events are stored. Choose based on your deployment:
+
+### MemorySink (testing)
+
+```python
+from bh_fastapi_audit import MemorySink
+
+sink = MemorySink()
+# After requests: sink.events contains all emitted events
+```
+
+### JsonlFileSink (local dev, demos)
+
+Writes one JSON object per line. Thread-safe, flushes by default.
+
+```python
+from bh_fastapi_audit import JsonlFileSink
+
+sink = JsonlFileSink("/var/log/audit/events.jsonl")
+# Events appended as compact JSON lines
+```
+
+### SQLAlchemySink (production)
+
+Stores events in a relational database with query-friendly columns plus full JSON.
+
+```python
+from bh_fastapi_audit import SQLAlchemySink
+
+# PostgreSQL
+sink = SQLAlchemySink("postgresql://user:pass@localhost/mydb")
+
+# SQLite (for local testing)
+sink = SQLAlchemySink("sqlite:///audit.db")
+```
+
+The sink creates a `bh_audit_events` table with indexed columns for common compliance queries:
+- `timestamp`, `patient_id`, `actor_subject_id`, `action_type`, `outcome_status`
+- Full event stored in `event_json` column
+
+See [docs/indexing.md](docs/indexing.md) for recommended database indexes and query examples.
 
 ## Configuration
 
@@ -143,6 +190,8 @@ config = AuditConfig(
 
 ## Installation
 
+**Requires Python 3.11+**
+
 ```bash
 # From source (development)
 git clone https://github.com/bh-healthcare/bh-fastapi-audit
@@ -152,7 +201,17 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-PyPI publication planned for v0.2 when sinks are production-ready.
+### Optional dependencies
+
+```bash
+# For SQLAlchemy sink
+pip install bh-fastapi-audit[sqlalchemy]
+
+# For JSON schema validation (planned)
+pip install bh-fastapi-audit[jsonschema]
+```
+
+PyPI publication planned for v0.2.
 
 ## License
 

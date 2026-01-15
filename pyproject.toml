@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "FastAPI middleware for emitting PHI-safe audit events for behavioral healthcare systems"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [
     { name = "BH Healthcare", email = "oss@bh-healthcare.github.io" }
 ]
@@ -29,8 +29,6 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: System :: Logging",
@@ -44,13 +42,16 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
     "httpx>=0.24.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "sqlalchemy>=2.0.0",
 ]
 jsonschema = [
     "jsonschema>=4.0.0",
+]
+sqlalchemy = [
+    "sqlalchemy>=2.0.0",
 ]
 
 [project.urls]
@@ -82,7 +83,7 @@ include = [
 ]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
@@ -96,12 +97,11 @@ select = [
 ]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
 
