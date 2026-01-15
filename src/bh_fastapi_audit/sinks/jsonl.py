@@ -72,7 +72,7 @@ class JsonlFileSink:
         """Return the path to the output file."""
         return self._path
 
-    def __enter__(self) -> "JsonlFileSink":
+    def __enter__(self) -> JsonlFileSink:
         """Context manager entry."""
         return self
 

@@ -6,10 +6,8 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
-import pytest
 
 from bh_fastapi_audit.sinks.jsonl import JsonlFileSink
 
@@ -19,7 +17,7 @@ def make_test_event(event_id: str | None = None) -> dict:
     return {
         "schema_version": "1.0",
         "event_id": event_id or str(uuid.uuid4()),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "service": {
             "name": "test-service",
             "environment": "test",

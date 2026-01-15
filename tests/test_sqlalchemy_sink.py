@@ -6,11 +6,14 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from bh_fastapi_audit.sinks.sqlalchemy import SQLAlchemySink
+# Skip all tests in this module if sqlalchemy is not installed
+sqlalchemy = pytest.importorskip("sqlalchemy")
+
+from bh_fastapi_audit.sinks.sqlalchemy import SQLAlchemySink  # noqa: E402
 
 
 def make_test_event(
@@ -22,7 +25,7 @@ def make_test_event(
     event = {
         "schema_version": "1.0",
         "event_id": event_id or str(uuid.uuid4()),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "service": {
             "name": "test-service",
             "environment": "test",

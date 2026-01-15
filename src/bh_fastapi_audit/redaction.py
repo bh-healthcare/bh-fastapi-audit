@@ -6,7 +6,7 @@ sensitive information before including it in audit events.
 """
 
 import re
-from typing import Sequence
+from collections.abc import Sequence
 
 # Default max length for error messages
 DEFAULT_MAX_ERROR_LENGTH = 200

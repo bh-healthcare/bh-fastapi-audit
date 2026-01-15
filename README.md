@@ -15,7 +15,7 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.1 (unreleased)** — Core audit middleware with PHI-safe defaults.
+**Current version: v0.1.0** — Initial release with PHI-safe defaults.
 
 ### v0.1 (current)
 - FastAPI middleware that emits events conforming to bh-audit-schema v1.0
@@ -198,17 +198,21 @@ git clone https://github.com/bh-healthcare/bh-fastapi-audit
 cd bh-fastapi-audit
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,sqlalchemy]"
 ```
 
 ### Optional dependencies
 
 ```bash
-# For SQLAlchemy sink
+# For SQLAlchemy sink (production database storage)
 pip install bh-fastapi-audit[sqlalchemy]
+```
 
-# For JSON schema validation (planned)
-pip install bh-fastapi-audit[jsonschema]
+### Planned extras
+
+```bash
+# JSON schema validation (not yet implemented)
+# pip install bh-fastapi-audit[jsonschema]
 ```
 
 PyPI publication planned for v0.2.
