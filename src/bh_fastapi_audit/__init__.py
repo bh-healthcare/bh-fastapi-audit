@@ -13,14 +13,17 @@ from bh_fastapi_audit.redaction import (
     redact_tokens,
     sanitize_error_message,
 )
-from bh_fastapi_audit.sinks import AuditSink, MemorySink
+from bh_fastapi_audit.sinks import AuditSink, JsonlFileSink, MemorySink, SQLAlchemySink
 
 __all__ = [
     "__version__",
     "AuditConfig",
     "AuditMiddleware",
+    # Sinks
     "AuditSink",
+    "JsonlFileSink",
     "MemorySink",
+    "SQLAlchemySink",
     # Redaction utilities
     "contains_phi_tokens",
     "redact_tokens",
