@@ -1,0 +1,11 @@
+{
+  "tokens": [
+    "SSN_123-45-6789",
+    "DOB_1990-01-01",
+    "PATIENT_JANE_DOE",
+    "DIAGNOSIS_BIPOLAR",
+    "NOTE_TEXT_I_AM_NOT_OK",
+    "EMAIL_jane.doe@example.com"
+  ],
+  "description": "Synthetic PHI tokens for testing. These are obviously fake but representative of sensitive data patterns."
+}

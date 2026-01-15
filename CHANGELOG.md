@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSONL file sink for audit event persistence
 - SQL database sink support
 - Schema validation for emitted events
-- PHI redaction utilities
 
 ## [0.1.0] - 2026-01-14
 
@@ -22,14 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AuditConfig` - Configuration dataclass for middleware settings
 - `AuditSink` - Protocol for pluggable audit event sinks
 - `MemorySink` - In-memory sink for testing and development
-- PHI-safe defaults (no request/response body logging)
-- Route template extraction (not raw paths)
-- HTTP method to action type mapping (GET→READ, POST→CREATE, etc.)
 - Correlation ID extraction from headers (X-Request-ID, X-Trace-ID, traceparent, X-Session-ID)
 - Configurable excluded paths (defaults: /health, /healthz, /ready)
 - Custom actor extraction via `get_actor` callback
 - Custom resource extraction via `get_resource` callback
-- 18 tests covering event emission and structure
+
+### PHI Safety (Issue #2)
+
+- **No bodies logged**: Request/response bodies are never read or logged
+- **Route templates only**: Uses route templates, not raw paths with IDs
+- **Safe headers only**: Only extracts allowlisted headers (no Authorization, Cookie)
+- **Error sanitization**: `sanitize_error_message()` strips patterns (SSN, email, phone) and truncates
+- **Metadata allowlist**: `metadata_allowlist` config ensures only safe keys are logged
+- Redaction utilities: `sanitize_error_message()`, `contains_phi_tokens()`, `redact_tokens()`
+- PHI safety tests with synthetic tokens prove no leakage
 
 ### Schema Conformance
 
