@@ -15,18 +15,18 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.1 (unreleased)** — Core audit middleware with in-memory sink for testing.
+**Current version: v0.1 (unreleased)** — Core audit middleware with PHI-safe defaults.
 
 ### v0.1 (current)
-- ✅ FastAPI middleware that emits events conforming to bh-audit-schema v1.0
-- ✅ PHI-safe defaults (no request/response bodies logged)
-- ✅ Captures: service, actor, action, resource, outcome, correlation
-- ✅ In-memory sink for testing (`MemorySink`)
+- FastAPI middleware that emits events conforming to bh-audit-schema v1.0
+- PHI-safe defaults (no bodies, safe headers only, error sanitization)
+- Captures: service, actor, action, resource, outcome, correlation
+- In-memory sink for testing (`MemorySink`)
+- Redaction utilities for error message sanitization
 
 ### Planned
 - Pluggable sinks (JSONL file, SQL databases)
-- Schema validation
-- PHI redaction utilities
+- Schema validation for emitted events
 
 The bh-audit-schema v1.0 JSON schema is vendored into this package for offline validation.
 
@@ -81,15 +81,52 @@ Each request emits an audit event like:
 | `default_actor_type` | `"service"` | Default actor type (`"human"` or `"service"`) |
 | `get_actor` | `None` | Callback `(Request) -> dict` for custom actor extraction |
 | `get_resource` | `None` | Callback `(Request, Response) -> dict` for custom resource extraction |
+| `get_metadata` | `None` | Callback `(Request, Response) -> dict` for custom metadata |
+| `metadata_allowlist` | `set()` | Set of allowed metadata keys (empty = no metadata) |
 | `excluded_paths` | `{"/health", "/healthz", "/ready"}` | Paths to skip auditing |
 
 ## PHI-safe defaults
 
 This library is designed to be safe by default:
 
-- Does not log request or response bodies
-- Uses route templates instead of raw paths (avoids leaking IDs in URLs)
-- Only captures allowlisted headers (correlation IDs, not auth tokens)
+- **No bodies**: Never reads or logs request/response bodies
+- **Route templates**: Uses `/patients/{id}` not `/patients/12345`
+- **Safe headers only**: Only extracts correlation headers (no Authorization, Cookie)
+- **Error sanitization**: Exception messages are stripped of SSN/email/phone patterns and truncated
+
+PHI safety is enforced by tests that assert synthetic PHI tokens never appear in emitted events.
+
+### Error message sanitization
+
+When exceptions occur, error messages are automatically sanitized:
+
+```python
+from bh_fastapi_audit import sanitize_error_message
+
+# Patterns like SSNs, emails, phone numbers are redacted
+sanitize_error_message("Patient SSN 123-45-6789 invalid")
+# → "Patient SSN [REDACTED-SSN] invalid"
+
+# Long messages are truncated (default 200 chars)
+sanitize_error_message("x" * 500)
+# → "xxxx...xxx..."
+```
+
+### Metadata allowlist
+
+Metadata is opt-in and strictly filtered:
+
+```python
+config = AuditConfig(
+    service_name="my-api",
+    get_metadata=lambda req, res: {
+        "content_length": req.headers.get("content-length"),
+        "status_family": f"{res.status_code // 100}xx",
+        "notes": "sensitive",
+    },
+    metadata_allowlist={"content_length", "status_family"},  # Only these keys appear
+)
+```
 
 ## Scope and non-goals
 

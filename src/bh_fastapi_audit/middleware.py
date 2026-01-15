@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from bh_fastapi_audit.redaction import sanitize_error_message
 from bh_fastapi_audit.sinks.base import AuditSink
 
 
@@ -26,6 +27,24 @@ HTTP_METHOD_TO_ACTION: dict[str, str] = {
 
 SCHEMA_VERSION = "1.0"
 
+# Headers that are safe to extract for correlation
+# Authorization, Cookie, and other sensitive headers are explicitly excluded
+_SAFE_CORRELATION_HEADERS = frozenset({
+    "x-request-id",
+    "x-trace-id",
+    "traceparent",
+    "x-session-id",
+})
+
+# Headers that are safe to log (non-sensitive)
+_SAFE_LOGGED_HEADERS = frozenset({
+    "user-agent",
+    "accept",
+    "accept-language",
+    "content-type",
+    "content-length",
+})
+
 
 @dataclass
 class AuditConfig:
@@ -38,6 +57,11 @@ class AuditConfig:
         service_version: Optional version string for the service.
         default_actor_id: Default actor ID when no user is authenticated.
         default_actor_type: Default actor type ("human" or "service").
+        get_actor: Optional callback to extract actor from request.
+        get_resource: Optional callback to extract resource from request/response.
+        get_metadata: Optional callback to provide custom metadata.
+        metadata_allowlist: Set of allowed metadata keys. Empty = no metadata.
+        excluded_paths: Paths to skip auditing.
     """
 
     service_name: str
@@ -47,6 +71,8 @@ class AuditConfig:
     default_actor_type: str = "service"
     get_actor: Callable[[Request], dict[str, Any] | None] | None = None
     get_resource: Callable[[Request, Response], dict[str, Any] | None] | None = None
+    get_metadata: Callable[[Request, Response], dict[str, Any] | None] | None = None
+    metadata_allowlist: set[str] = field(default_factory=set)
     excluded_paths: set[str] = field(default_factory=lambda: {"/health", "/healthz", "/ready"})
 
 
@@ -55,6 +81,12 @@ class AuditMiddleware(BaseHTTPMiddleware):
     FastAPI middleware that emits audit events for each request.
 
     Events conform to bh-audit-schema v1.0.
+
+    PHI Safety Guarantees:
+    - Never reads or logs request/response bodies
+    - Only extracts allowlisted headers (no Authorization, Cookie, etc.)
+    - Sanitizes exception messages before logging
+    - Metadata is opt-in via allowlist
     """
 
     def __init__(
@@ -84,28 +116,53 @@ class AuditMiddleware(BaseHTTPMiddleware):
         # Capture request start time
         start_time = datetime.now(timezone.utc)
 
-        # Process request
-        response: Response = await call_next(request)
+        # Track exception info for audit event
+        exc_info: tuple[str, str] | None = None
 
-        # Build and emit audit event
-        event = self._build_event(request, response, start_time)
-        self.sink.emit(event)
-
-        return response
+        try:
+            # Process request
+            response: Response = await call_next(request)
+        except Exception as exc:
+            # Capture exception details for audit (sanitized)
+            exc_info = (
+                exc.__class__.__name__,
+                sanitize_error_message(str(exc)),
+            )
+            # Re-raise to let FastAPI handle the error response
+            raise
+        else:
+            # Build and emit audit event for successful processing
+            event = self._build_event(request, response, start_time, exc_info=None)
+            self.sink.emit(event)
+            return response
+        finally:
+            # If we caught an exception, emit the audit event before propagating
+            # Note: We can't access response in exception case, so we use a 500 placeholder
+            if exc_info is not None:
+                # Create a minimal response stand-in for the audit event
+                event = self._build_event(
+                    request,
+                    response=None,
+                    timestamp=start_time,
+                    exc_info=exc_info,
+                )
+                self.sink.emit(event)
 
     def _build_event(
         self,
         request: Request,
-        response: Response,
+        response: Response | None,
         timestamp: datetime,
+        exc_info: tuple[str, str] | None = None,
     ) -> dict[str, Any]:
         """
         Build an audit event from request/response data.
 
         Args:
             request: The incoming request.
-            response: The response being sent.
+            response: The response being sent (None if exception occurred).
             timestamp: When the request started.
+            exc_info: Optional tuple of (error_type, sanitized_message) if exception.
 
         Returns:
             An audit event dictionary conforming to bh-audit-schema.
@@ -119,13 +176,18 @@ class AuditMiddleware(BaseHTTPMiddleware):
             "action": self._build_action(request),
             "resource": self._build_resource(request, response),
             "http": self._build_http(request, response),
-            "outcome": self._build_outcome(response),
+            "outcome": self._build_outcome(response, exc_info),
         }
 
         # Add correlation if available
         correlation = self._build_correlation(request)
         if correlation:
             event["correlation"] = correlation
+
+        # Add metadata if configured and allowlisted
+        metadata = self._build_metadata(request, response)
+        if metadata:
+            event["metadata"] = metadata
 
         return event
 
@@ -166,13 +228,13 @@ class AuditMiddleware(BaseHTTPMiddleware):
             "data_classification": "UNKNOWN",
         }
 
-    def _build_resource(self, request: Request, response: Response) -> dict[str, Any]:
+    def _build_resource(self, request: Request, response: Response | None) -> dict[str, Any]:
         """
         Build the resource block.
 
         Uses custom get_resource callback if provided, otherwise defaults.
         """
-        if self.config.get_resource:
+        if self.config.get_resource and response is not None:
             custom_resource = self.config.get_resource(request, response)
             if custom_resource:
                 return custom_resource
@@ -184,14 +246,22 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         return {"type": "Unknown"}
 
-    def _build_http(self, request: Request, response: Response) -> dict[str, Any]:
-        """Build the HTTP context block."""
+    def _build_http(self, request: Request, response: Response | None) -> dict[str, Any]:
+        """
+        Build the HTTP context block.
+
+        PHI Safety: Only includes safe fields. Never includes:
+        - Request/response bodies
+        - Query string parameters
+        - Authorization or Cookie headers
+        - Raw URL path (uses route template instead)
+        """
         http: dict[str, Any] = {
             "method": request.method,
-            "status_code": response.status_code,
+            "status_code": response.status_code if response else 500,
         }
 
-        # Get route template if available
+        # Get route template if available (NOT the raw path with IDs)
         route = getattr(request, "scope", {}).get("route")
         if route and hasattr(route, "path"):
             http["route_template"] = route.path
@@ -201,42 +271,53 @@ class AuditMiddleware(BaseHTTPMiddleware):
         if client and client.host:
             http["client_ip"] = client.host
 
-        # Add user agent if present
+        # Only log safe headers
         user_agent = request.headers.get("user-agent")
         if user_agent:
             http["user_agent"] = user_agent
 
         return http
 
-    def _build_outcome(self, response: Response) -> dict[str, Any]:
-        """Build the outcome block based on response status code."""
+    def _build_outcome(
+        self,
+        response: Response | None,
+        exc_info: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Build the outcome block based on response status code or exception.
+
+        If an exception occurred, includes sanitized error information.
+        """
+        if exc_info is not None:
+            error_type, error_message = exc_info
+            return {
+                "status": "FAILURE",
+                "error_type": error_type,
+                "error_message": error_message,
+            }
+
+        if response is None:
+            return {"status": "FAILURE"}
+
         status = "SUCCESS" if response.status_code < 400 else "FAILURE"
         return {"status": status}
 
     def _build_correlation(self, request: Request) -> dict[str, Any] | None:
         """
-        Build correlation block from request headers.
+        Build correlation block from safe request headers only.
 
-        Looks for common correlation headers:
-        - X-Request-ID / X-Request-Id
-        - X-Trace-ID / X-Trace-Id / traceparent
-        - X-Session-ID / X-Session-Id
+        PHI Safety: Only extracts from allowlisted correlation headers.
+        Never reads Authorization, Cookie, or other sensitive headers.
         """
         correlation: dict[str, Any] = {}
 
-        # Request ID
-        request_id = (
-            request.headers.get("x-request-id")
-            or request.headers.get("x-request-Id")
-        )
+        # Request ID - only from safe headers
+        request_id = request.headers.get("x-request-id")
         if request_id:
             correlation["request_id"] = request_id
 
         # Trace ID (OpenTelemetry traceparent or custom header)
-        trace_id = (
-            request.headers.get("x-trace-id")
-            or request.headers.get("x-trace-Id")
-        )
+        trace_id = request.headers.get("x-trace-id")
         if not trace_id:
             # Try to extract from traceparent header (format: version-trace_id-parent_id-flags)
             traceparent = request.headers.get("traceparent")
@@ -248,11 +329,36 @@ class AuditMiddleware(BaseHTTPMiddleware):
             correlation["trace_id"] = trace_id
 
         # Session ID
-        session_id = (
-            request.headers.get("x-session-id")
-            or request.headers.get("x-session-Id")
-        )
+        session_id = request.headers.get("x-session-id")
         if session_id:
             correlation["session_id"] = session_id
 
         return correlation if correlation else None
+
+    def _build_metadata(self, request: Request, response: Response | None) -> dict[str, Any] | None:
+        """
+        Build metadata block with strict allowlist filtering.
+
+        PHI Safety:
+        - Metadata is opt-in (empty allowlist by default)
+        - Only keys in allowlist are included
+        - All other keys are silently dropped
+        """
+        if not self.config.get_metadata or not self.config.metadata_allowlist:
+            return None
+
+        if response is None:
+            return None
+
+        raw_metadata = self.config.get_metadata(request, response)
+        if not raw_metadata:
+            return None
+
+        # Filter to only allowlisted keys
+        filtered = {
+            key: value
+            for key, value in raw_metadata.items()
+            if key in self.config.metadata_allowlist
+        }
+
+        return filtered if filtered else None
