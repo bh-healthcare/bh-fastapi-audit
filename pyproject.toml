@@ -22,7 +22,7 @@ keywords = [
     "middleware",
 ]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "Intended Audience :: Healthcare Industry",
@@ -45,7 +45,6 @@ dev = [
     "httpx>=0.24.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
-    "sqlalchemy>=2.0.0",
 ]
 jsonschema = [
     "jsonschema>=4.0.0",
@@ -72,14 +71,11 @@ include = [
     "/LICENSE",
 ]
 
-[tool.hatch.build.targets.wheel.shared-data]
-
-# Include JSON schema files in the package
+# Include JSON schema files and py.typed marker in the package
 [tool.hatch.build]
-include = [
-    "src/bh_fastapi_audit/**/*.py",
-    "src/bh_fastapi_audit/**/*.json",
-    "src/bh_fastapi_audit/py.typed",
+artifacts = [
+    "*.json",
+    "py.typed",
 ]
 
 [tool.ruff]

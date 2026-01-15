@@ -3,9 +3,10 @@ FastAPI audit middleware for emitting structured audit events.
 """
 
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -13,7 +14,6 @@ from starlette.responses import Response
 
 from bh_fastapi_audit.redaction import sanitize_error_message
 from bh_fastapi_audit.sinks.base import AuditSink
-
 
 # HTTP method to action type mapping
 HTTP_METHOD_TO_ACTION: dict[str, str] = {
@@ -114,7 +114,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Capture request start time
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         # Track exception info for audit event
         exc_info: tuple[str, str] | None = None
