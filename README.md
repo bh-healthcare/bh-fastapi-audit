@@ -15,15 +15,18 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.1.0** — Initial release with PHI-safe defaults.
+**Current version: v0.2.0** — Now available on PyPI with cloud-ready logging.
 
-### v0.1 (current)
-- FastAPI middleware that emits events conforming to bh-audit-schema v1.0
+### v0.2 (current)
+- **PyPI distribution** — `pip install bh-fastapi-audit`
+- **LoggingSink** — stdout/logging-based sink for cloud deployments
+- FastAPI middleware emitting events conforming to bh-audit-schema v1.0
 - PHI-safe defaults (no bodies, safe headers only, error sanitization)
 - Captures: service, actor, action, resource, outcome, correlation
 - Pluggable sinks:
   - `MemorySink` — in-memory for testing
   - `JsonlFileSink` — JSON Lines file for local dev and demos
+  - `LoggingSink` — Python logging for cloud platforms (CloudWatch, Cloud Logging, Azure Monitor, Kubernetes)
   - `SQLAlchemySink` — relational database storage (Postgres, SQLite, etc., via SQLAlchemy Core)
 - Redaction utilities for error message sanitization
 
@@ -95,7 +98,20 @@ sink = JsonlFileSink("/var/log/audit/events.jsonl")
 # Events appended as compact JSON lines
 ```
 
-### SQLAlchemySink (production)
+### LoggingSink (cloud deployments)
+
+Emits one compact JSON audit event per request using Python logging. Works with any platform that captures application stdout, including AWS CloudWatch, GCP Cloud Logging, Azure Monitor, and Kubernetes-based logging pipelines.
+
+```python
+from bh_fastapi_audit import LoggingSink
+
+sink = LoggingSink(logger_name="bh.audit", level="INFO")
+# Each event emitted as a single JSON line via logging
+```
+
+No SDK dependencies, no retries, no buffering. The cloud platform handles collection.
+
+### SQLAlchemySink (production database)
 
 Stores events in a relational database with query-friendly columns plus full JSON.
 
@@ -193,12 +209,7 @@ config = AuditConfig(
 **Requires Python 3.11+**
 
 ```bash
-# From source (development)
-git clone https://github.com/bh-healthcare/bh-fastapi-audit
-cd bh-fastapi-audit
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev,sqlalchemy]"
+pip install bh-fastapi-audit
 ```
 
 ### Optional dependencies
@@ -208,14 +219,15 @@ pip install -e ".[dev,sqlalchemy]"
 pip install bh-fastapi-audit[sqlalchemy]
 ```
 
-### Planned extras
+### Development installation
 
 ```bash
-# JSON schema validation (not yet implemented)
-# pip install bh-fastapi-audit[jsonschema]
+git clone https://github.com/bh-healthcare/bh-fastapi-audit
+cd bh-fastapi-audit
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev,sqlalchemy]"
 ```
-
-PyPI publication planned for v0.2.
 
 ## License
 
