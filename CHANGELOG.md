@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Schema validation for emitted events
 - Non-blocking / async sink variants (optional)
 
+## [0.2.0] - 2026-01-21
+
+### Added
+
+- `LoggingSink` - Emits audit events via Python logging as compact JSON lines
+  - Works with any platform that captures stdout: AWS CloudWatch, GCP Cloud Logging, Azure Monitor, Kubernetes
+  - Configurable logger name and log level
+  - No SDK dependencies, no retries, no buffering - simple and reliable
+- PyPI distribution - `pip install bh-fastapi-audit` now works
+- GitHub Actions workflow for automated PyPI publishing on tags
+
+### Changed
+
+- Package now available on PyPI for easy installation
+
 ## [0.1.0] - 2026-01-14
 
 ### Added
@@ -53,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Apache 2.0 license
 - Vendored bh-audit-schema v1.0 JSON schema
 
-[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/bh-healthcare/bh-fastapi-audit/releases/tag/v0.0.1

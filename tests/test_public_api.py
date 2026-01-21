@@ -13,6 +13,7 @@ def test_public_api_imports():
         AuditMiddleware,
         AuditSink,
         JsonlFileSink,
+        LoggingSink,
         MemorySink,
         contains_phi_tokens,
         redact_tokens,
@@ -25,6 +26,7 @@ def test_public_api_imports():
     assert AuditSink is not None
     assert MemorySink is not None
     assert JsonlFileSink is not None
+    assert LoggingSink is not None
     assert callable(sanitize_error_message)
     assert callable(contains_phi_tokens)
     assert callable(redact_tokens)
@@ -52,7 +54,7 @@ def test_version_exposed():
     from bh_fastapi_audit import __version__
 
     assert isinstance(__version__, str)
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.2.0"
 
 
 def test_all_exports_defined():
@@ -65,6 +67,7 @@ def test_all_exports_defined():
         "AuditMiddleware",
         "AuditSink",
         "JsonlFileSink",
+        "LoggingSink",
         "MemorySink",
         "SQLAlchemySink",
         "contains_phi_tokens",
