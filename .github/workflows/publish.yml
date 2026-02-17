@@ -36,6 +36,7 @@ jobs:
     environment: pypi
     permissions:
       id-token: write  # Required for trusted publishing
+      contents: read
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4

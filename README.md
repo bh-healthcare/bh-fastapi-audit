@@ -15,7 +15,7 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.2.0** — Now available on PyPI with cloud-ready logging.
+**Current version: v0.2.1** — Now available on PyPI with cloud-ready logging.
 
 ### v0.2 (current)
 - **PyPI distribution** — `pip install bh-fastapi-audit`
@@ -73,6 +73,23 @@ Each request emits an audit event like:
   "outcome": { "status": "SUCCESS" }
 }
 ```
+
+## Production Example: Container Logging (CloudWatch / GCP / K8s)
+
+```python
+from fastapi import FastAPI
+from bh_fastapi_audit import AuditMiddleware, AuditConfig, LoggingSink
+
+app = FastAPI()
+
+app.add_middleware(
+    AuditMiddleware,
+    sink=LoggingSink(logger_name="audit"),
+    config=AuditConfig(service_name="my-api", service_environment="prod"),
+)
+```
+
+When deployed in containers, audit events are emitted as structured JSON logs to stdout and collected by your platform logging system (CloudWatch, Cloud Logging, Azure Monitor, Fluentd, etc.). No SDK dependencies required.
 
 ## Sinks
 
@@ -190,6 +207,10 @@ config = AuditConfig(
     metadata_allowlist={"content_length", "status_family"},  # Only these keys appear
 )
 ```
+
+## Performance
+
+Audit emission is synchronous in v0.2.x. For high-throughput systems, use `LoggingSink` or a non-blocking sink (planned for v0.3).
 
 ## Scope and non-goals
 

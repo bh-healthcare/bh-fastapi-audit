@@ -164,6 +164,16 @@ class TestLoggingSink:
         parsed = json.loads(record.message)
         assert parsed["actor"]["subject_id"] == "user_日本語_émoji_🏥"
 
+    def test_log_record_has_audit_extra(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Log record should carry extra={'audit': True} for filtering."""
+        sink = LoggingSink(logger_name="bh.audit.test", level="INFO")
+
+        with caplog.at_level(logging.INFO, logger="bh.audit.test"):
+            sink.emit(make_test_event())
+
+        record = caplog.records[0]
+        assert getattr(record, "audit", None) is True
+
     def test_multiple_events_multiple_records(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:

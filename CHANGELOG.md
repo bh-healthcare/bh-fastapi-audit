@@ -9,8 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- Schema validation for emitted events
-- Non-blocking / async sink variants (optional)
+- Schema validation for emitted events (optional, v0.4)
+- Non-blocking / async sink variants (v0.3)
+
+## [0.2.1] - 2026-02-17
+
+### Added
+
+- `LoggingSink` now attaches `extra={"audit": True}` to log records, enabling
+  easy filtering of audit logs from application logs in aggregation systems
+- Production container logging example in README (CloudWatch / GCP / K8s)
+- Performance note in README documenting synchronous emission in v0.2.x
+
+### Changed
+
+- Explicit `__all__` public API surface confirmed and tested
+- README version updated to v0.2.1
+
+### Compatibility
+
+- Python 3.11+ unchanged
+- No breaking changes from 0.2.0
 
 ## [0.2.0] - 2026-01-21
 
@@ -68,7 +87,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Apache 2.0 license
 - Vendored bh-audit-schema v1.0 JSON schema
 
-[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/bh-healthcare/bh-fastapi-audit/releases/tag/v0.0.1

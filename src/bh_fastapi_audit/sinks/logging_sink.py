@@ -54,7 +54,7 @@ class LoggingSink:
         """
         # Compact JSON: no extra whitespace, single line
         line = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
-        self._logger.log(self._level, line)
+        self._logger.log(self._level, line, extra={"audit": True})
 
     @property
     def logger_name(self) -> str:
