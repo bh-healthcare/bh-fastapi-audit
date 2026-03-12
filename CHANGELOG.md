@@ -19,9 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sink failure isolation** — new `emit_failure_mode` config (`"silent"`, `"log"`, `"raise"`)
   controls what happens when a sink raises during emission. Default `"log"` ensures audit
   failures never break request handling while still surfacing diagnostics.
-- **Internal counters** — `AuditStats` dataclass with `events_emitted_total`,
-  `emit_failures_total`, `events_dropped_total`, `validation_failures_total`.
-  Access via `middleware.stats.snapshot()`.
+- **Internal counters** — thread-safe `AuditStats` with `events_emitted_total`,
+  `emit_failures_total`, `callback_failures_total`, `events_dropped_total`,
+  `validation_failures_total`. Access via `middleware.stats.snapshot()`.
 - **Metadata safety enforcement** — metadata values are now restricted to scalar
   JSON types (str, int, float, bool, None); dict/list/tuple values are silently
   dropped. Long strings are truncated to `max_metadata_value_length` (default 200).
@@ -50,6 +50,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exception-path events hardcoded `status_code: 500`)
 - Compact internal failure logs include only `event_id`, `service.name`,
   `action.type`, `resource.type` — never the full event payload
+
+### Fixed
+
+- **Exception masking in finally block** — if `_build_event` failed while
+  handling an application exception, the original exception was silently replaced.
+  The finally block is now wrapped in its own try/except.
+- **SQL injection in `SQLAlchemySink.count()`** — table name was f-string
+  interpolated into raw SQL. Now uses parameterized `select(func.count())`.
+- **`IntegrityError` catch too broad** — previously swallowed all integrity
+  violations; now only suppresses duplicate `event_id` conflicts.
+- **`service_environment` always-truthy guard** — the `if` check was dead code
+  since the default is `"unknown"`. Environment is now always included.
+- Removed unused `_SAFE_LOGGED_HEADERS` constant.
 
 ### Compatibility
 

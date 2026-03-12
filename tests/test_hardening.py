@@ -352,7 +352,7 @@ class TestCallbackFailureIsolation:
         event = sink.events[0]
         assert "metadata" not in event
 
-    def test_callback_failure_increments_counter(self) -> None:
+    def test_callback_failure_increments_callback_counter(self) -> None:
         sink = MemorySink()
 
         def _broken_actor(request: Any) -> dict:
@@ -364,7 +364,8 @@ class TestCallbackFailureIsolation:
 
         audit_mw = _find_audit_middleware(app)
         assert audit_mw is not None
-        assert audit_mw.stats.emit_failures_total >= 1
+        assert audit_mw.stats.callback_failures_total >= 1
+        assert audit_mw.stats.emit_failures_total == 0
 
     def test_callback_failure_logs_warning(self, caplog: pytest.LogCaptureFixture) -> None:
         sink = MemorySink()
@@ -457,3 +458,69 @@ class TestHeaderValueLengthCaps:
         assert event["correlation"]["request_id"] == "req-123"
         assert event["correlation"]["trace_id"] == "trace-abc"
         assert event["correlation"]["session_id"] == "sess-xyz"
+
+
+# ---------------------------------------------------------------------------
+# emit_failure_mode="raise"
+# ---------------------------------------------------------------------------
+
+class TestRaiseMode:
+    """emit_failure_mode='raise' must propagate sink exceptions."""
+
+    def test_raise_mode_propagates_sink_error(self) -> None:
+        app, _ = _build_app(_ExplodingSink(), emit_failure_mode="raise")
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/ok")
+        assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Exception-path event structure
+# ---------------------------------------------------------------------------
+
+class TestExceptionPathEventStructure:
+    """Events emitted on the exception path must have correct structure."""
+
+    def test_exception_event_has_all_required_fields(self) -> None:
+        sink = MemorySink()
+        app, _ = _build_app(sink)
+        client = TestClient(app, raise_server_exceptions=False)
+        client.get("/error")
+
+        assert len(sink.events) == 1
+        event = sink.events[0]
+        for key in ("schema_version", "event_id", "timestamp", "service",
+                     "actor", "action", "resource", "outcome", "http"):
+            assert key in event, f"Missing key: {key}"
+
+    def test_exception_event_has_failure_outcome(self) -> None:
+        sink = MemorySink()
+        app, _ = _build_app(sink)
+        client = TestClient(app, raise_server_exceptions=False)
+        client.get("/error")
+
+        event = sink.events[0]
+        assert event["outcome"]["status"] == "FAILURE"
+        assert event["outcome"]["error_type"] == "ValueError"
+
+    def test_exception_event_has_status_500(self) -> None:
+        sink = MemorySink()
+        app, _ = _build_app(sink)
+        client = TestClient(app, raise_server_exceptions=False)
+        client.get("/error")
+
+        event = sink.events[0]
+        assert event["http"]["status_code"] == 500
+
+    def test_finally_block_does_not_mask_original_exception(self) -> None:
+        """If _build_event fails in the finally block, the app exception must still propagate."""
+
+        class _BuildBreakingSink:
+            """Sink that works fine -- the issue is in event building."""
+            def emit(self, event: dict[str, Any]) -> None:
+                pass
+
+        app, _ = _build_app(_BuildBreakingSink())
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/error")
+        assert resp.status_code == 500

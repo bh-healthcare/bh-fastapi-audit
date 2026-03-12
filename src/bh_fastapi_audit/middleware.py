@@ -39,16 +39,6 @@ _SAFE_CORRELATION_HEADERS = frozenset({
     "x-session-id",
 })
 
-# Headers that are safe to log (non-sensitive)
-_SAFE_LOGGED_HEADERS = frozenset({
-    "user-agent",
-    "accept",
-    "accept-language",
-    "content-type",
-    "content-length",
-})
-
-
 _SCALAR_TYPES = (str, int, float, bool, type(None))
 
 # Hard cap for header-sourced string values (correlation IDs, user-agent).
@@ -136,9 +126,9 @@ class AuditMiddleware(BaseHTTPMiddleware):
         """Emit via sink with failure isolation governed by config."""
         try:
             self.sink.emit(event)
-            self._stats.events_emitted_total += 1
+            self._stats.increment("events_emitted_total")
         except Exception as exc:
-            self._stats.emit_failures_total += 1
+            self._stats.increment("emit_failures_total")
             mode = self.config.emit_failure_mode
             if mode == "raise":
                 raise
@@ -183,15 +173,17 @@ class AuditMiddleware(BaseHTTPMiddleware):
             self._safe_emit(event)
             return response
         finally:
-            # If we caught an exception, emit the audit event before propagating
             if exc_info is not None:
-                event = self._build_event(
-                    request,
-                    response=None,
-                    timestamp=start_time,
-                    exc_info=exc_info,
-                )
-                self._safe_emit(event)
+                try:
+                    event = self._build_event(
+                        request,
+                        response=None,
+                        timestamp=start_time,
+                        exc_info=exc_info,
+                    )
+                    self._safe_emit(event)
+                except Exception:
+                    self._stats.increment("emit_failures_total")
 
     def _build_event(
         self,
@@ -238,10 +230,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
     def _build_service(self) -> dict[str, Any]:
         """Build the service block."""
-        service: dict[str, Any] = {"name": self.config.service_name}
-
-        if self.config.service_environment:
-            service["environment"] = self.config.service_environment
+        service: dict[str, Any] = {
+            "name": self.config.service_name,
+            "environment": self.config.service_environment,
+        }
 
         if self.config.service_version:
             service["version"] = self.config.service_version
@@ -261,7 +253,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 if custom_actor:
                     return custom_actor
             except Exception as exc:
-                self._stats.emit_failures_total += 1
+                self._stats.increment("callback_failures_total")
                 self._failure_log.warning(
                     "get_actor callback failed, falling back to defaults: %s", exc,
                 )
@@ -293,7 +285,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 if custom_resource:
                     return custom_resource
             except Exception as exc:
-                self._stats.emit_failures_total += 1
+                self._stats.increment("callback_failures_total")
                 self._failure_log.warning(
                     "get_resource callback failed, falling back to defaults: %s", exc,
                 )
@@ -428,7 +420,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
         try:
             raw_metadata = self.config.get_metadata(request, response)
         except Exception as exc:
-            self._stats.emit_failures_total += 1
+            self._stats.increment("callback_failures_total")
             self._failure_log.warning(
                 "get_metadata callback failed, skipping metadata: %s", exc,
             )
