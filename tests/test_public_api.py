@@ -54,7 +54,7 @@ def test_version_exposed():
     from bh_fastapi_audit import __version__
 
     assert isinstance(__version__, str)
-    assert __version__ == "0.2.1"
+    assert __version__ == "0.2.2"
 
 
 def test_all_exports_defined():
@@ -65,6 +65,7 @@ def test_all_exports_defined():
         "__version__",
         "AuditConfig",
         "AuditMiddleware",
+        "AuditStats",
         "AuditSink",
         "JsonlFileSink",
         "LoggingSink",

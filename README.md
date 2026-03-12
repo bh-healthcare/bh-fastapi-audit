@@ -15,7 +15,7 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.2.1** — Now available on PyPI with cloud-ready logging.
+**Current version: v0.2.2** — Production hardening: sink failure isolation, metadata safety, internal counters.
 
 ### v0.2 (current)
 - **PyPI distribution** — `pip install bh-fastapi-audit`
@@ -91,6 +91,62 @@ app.add_middleware(
 
 When deployed in containers, audit events are emitted as structured JSON logs to stdout and collected by your platform logging system (CloudWatch, Cloud Logging, Azure Monitor, Fluentd, etc.). No SDK dependencies required.
 
+## Production hardening
+
+### Sink failure isolation
+
+By default, sink failures are logged but never break your request handling:
+
+```python
+config = AuditConfig(
+    service_name="my-api",
+    emit_failure_mode="log",       # "silent", "log" (default), or "raise"
+    failure_logger_name="bh.audit.internal",
+)
+```
+
+- `"silent"` — swallow errors, increment counter only
+- `"log"` — log a compact summary (event_id, service, action, resource) without the full payload
+- `"raise"` — re-raise the original exception (use in dev/test)
+
+### Client IP opt-in
+
+Client IP is excluded from audit events by default. Enable explicitly:
+
+```python
+config = AuditConfig(
+    service_name="my-api",
+    include_client_ip=True,   # default: False
+)
+```
+
+### Metadata restrictions
+
+Metadata values are enforced to be scalar JSON types (`str`, `int`, `float`, `bool`, `None`). Dict, list, and tuple values are silently dropped. Long strings are truncated:
+
+```python
+config = AuditConfig(
+    service_name="my-api",
+    metadata_allowlist={"content_length", "status_family"},
+    max_metadata_value_length=200,   # default; truncated strings end with "..."
+    get_metadata=lambda req, res: {"content_length": req.headers.get("content-length")},
+)
+```
+
+### Internal counters
+
+Track emission health via the middleware's stats:
+
+```python
+# After app startup, access via the middleware instance:
+# middleware.stats.snapshot()
+# {"events_emitted_total": 42, "emit_failures_total": 0, ...}
+```
+
+### Synchronous emission
+
+Audit emission is synchronous in v0.2.x. For high-throughput systems, use `LoggingSink` (which defers I/O to your logging pipeline) or plan for async sinks in v0.3.
+
 ## Sinks
 
 Sinks determine where audit events are stored. Choose based on your deployment:
@@ -164,6 +220,10 @@ See [docs/indexing.md](docs/indexing.md) for recommended database indexes and qu
 | `get_metadata` | `None` | Callback `(Request, Response) -> dict` for custom metadata |
 | `metadata_allowlist` | `set()` | Set of allowed metadata keys (empty = no metadata) |
 | `excluded_paths` | `{"/health", "/healthz", "/ready"}` | Paths to skip auditing |
+| `emit_failure_mode` | `"log"` | How to handle sink failures (`"silent"`, `"log"`, `"raise"`) |
+| `failure_logger_name` | `"bh.audit.internal"` | Logger name for internal failure diagnostics |
+| `max_metadata_value_length` | `200` | Max string length for metadata values before truncation |
+| `include_client_ip` | `False` | Whether to include client IP in emitted events |
 
 ## PHI-safe defaults
 
