@@ -126,7 +126,6 @@ class AuditMiddleware(BaseHTTPMiddleware):
         """Emit via sink with failure isolation governed by config."""
         try:
             self.sink.emit(event)
-            self._stats.increment("events_emitted_total")
         except Exception as exc:
             self._stats.increment("emit_failures_total")
             mode = self.config.emit_failure_mode
@@ -141,6 +140,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
                     event.get("resource", {}).get("type"),
                     exc,
                 )
+        else:
+            self._stats.increment("events_emitted_total")
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:  # type: ignore[type-arg]
         """Process request and emit audit event."""
