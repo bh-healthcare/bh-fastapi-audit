@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 
 from bh_fastapi_audit import AuditConfig, AuditMiddleware, MemorySink
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
