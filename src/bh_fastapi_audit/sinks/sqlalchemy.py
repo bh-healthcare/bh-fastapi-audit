@@ -20,7 +20,8 @@ from sqlalchemy import (
     Table,
     Text,
     create_engine,
-    text,
+    func,
+    select,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -121,9 +122,11 @@ class SQLAlchemySink:
             with self._engine.connect() as conn:
                 conn.execute(self._table.insert().values(**row))
                 conn.commit()
-        except IntegrityError:
-            # Duplicate event_id - silently ignore for append-only semantics
-            pass
+        except IntegrityError as exc:
+            if "event_id" in str(exc).lower() or "primary" in str(exc).lower():
+                pass
+            else:
+                raise
 
     def _extract_row(self, event: dict[str, Any]) -> dict[str, Any]:
         """Extract a flat row dict from the nested event structure."""
@@ -206,9 +209,7 @@ class SQLAlchemySink:
     def count(self) -> int:
         """Return the total number of stored events."""
         with self._engine.connect() as conn:
-            result = conn.execute(
-                text(f"SELECT COUNT(*) FROM {self._table_name}")  # noqa: S608
-            )
+            result = conn.execute(select(func.count()).select_from(self._table))
             row = result.fetchone()
             return row[0] if row else 0
 

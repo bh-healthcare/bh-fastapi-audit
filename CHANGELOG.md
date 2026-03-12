@@ -12,6 +12,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Schema validation for emitted events (optional, v0.4)
 - Non-blocking / async sink variants (v0.3)
 
+## [0.2.2] - 2026-03-11
+
+### Added
+
+- **Sink failure isolation** — new `emit_failure_mode` config (`"silent"`, `"log"`, `"raise"`)
+  controls what happens when a sink raises during emission. Default `"log"` ensures audit
+  failures never break request handling while still surfacing diagnostics.
+- **Internal counters** — thread-safe `AuditStats` with `events_emitted_total`,
+  `emit_failures_total`, `callback_failures_total`, `events_dropped_total`,
+  `validation_failures_total`. Access via `middleware.stats.snapshot()`.
+- **Metadata safety enforcement** — metadata values are now restricted to scalar
+  JSON types (str, int, float, bool, None); dict/list/tuple values are silently
+  dropped. Long strings are truncated to `max_metadata_value_length` (default 200).
+- **Client IP opt-in** — `include_client_ip` config (default `False`). Client IP
+  is no longer included in events unless explicitly enabled.
+- New config fields on `AuditConfig`:
+  - `emit_failure_mode: Literal["silent", "log", "raise"]` (default `"log"`)
+  - `failure_logger_name: str` (default `"bh.audit.internal"`)
+  - `max_metadata_value_length: int` (default `200`)
+  - `include_client_ip: bool` (default `False`)
+- `AuditStats` exported from package top level
+- `route_template` now defaults to `"unknown"` when no route is matched
+- **Callback failure isolation** — `get_actor`, `get_resource`, and `get_metadata`
+  callbacks are now wrapped in try/except. A failing callback falls back to safe
+  defaults, increments the failure counter, and logs a compact warning — it never
+  crashes the request.
+- **Header value length caps** — correlation IDs (`x-request-id`, `x-trace-id`,
+  `x-session-id`) and `user_agent` are now capped at 256 characters to prevent
+  unbounded user-controlled input from inflating audit events.
+
+### Changed
+
+- `AuditMiddleware.dispatch()` now uses safe emission wrapper instead of calling
+  `sink.emit()` directly
+- HTTPException status codes are preserved in emitted events (previously all
+  exception-path events hardcoded `status_code: 500`)
+- Compact internal failure logs include only `event_id`, `service.name`,
+  `action.type`, `resource.type` — never the full event payload
+
+### Fixed
+
+- **Exception masking in finally block** — if `_build_event` failed while
+  handling an application exception, the original exception was silently replaced.
+  The finally block is now wrapped in its own try/except.
+- **SQL injection in `SQLAlchemySink.count()`** — table name was f-string
+  interpolated into raw SQL. Now uses parameterized `select(func.count())`.
+- **`IntegrityError` catch too broad** — previously swallowed all integrity
+  violations; now only suppresses duplicate `event_id` conflicts.
+- **`service_environment` always-truthy guard** — the `if` check was dead code
+  since the default is `"unknown"`. Environment is now always included.
+- Removed unused `_SAFE_LOGGED_HEADERS` constant.
+
+### Compatibility
+
+- Python 3.11+ unchanged
+- No breaking changes to the public shape of emitted events
+- Synchronous emission remains the default in v0.2.x
+
 ## [0.2.1] - 2026-02-17
 
 ### Added
@@ -87,7 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Apache 2.0 license
 - Vendored bh-audit-schema v1.0 JSON schema
 
-[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.0.1...v0.1.0
