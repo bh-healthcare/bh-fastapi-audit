@@ -1,6 +1,12 @@
 """
-FastAPI audit middleware for emitting structured audit events.
+Pure ASGI audit middleware for emitting structured audit events.
+
+v0.3 rewrites the middleware as a direct ASGI implementation (no longer
+based on ``BaseHTTPMiddleware``).  This enables streaming response support,
+avoids known Starlette issues, and reduces per-request overhead.
 """
+
+from __future__ import annotations
 
 import logging
 import uuid
@@ -9,15 +15,24 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.routing import Match
 
+from bh_fastapi_audit._queue import EmitQueue
 from bh_fastapi_audit._stats import AuditStats
+from bh_fastapi_audit._types import (
+    ActionBlock,
+    ActorBlock,
+    AuditEvent,
+    CorrelationBlock,
+    HttpBlock,
+    OutcomeBlock,
+    ServiceBlock,
+)
 from bh_fastapi_audit.redaction import sanitize_error_message
+from bh_fastapi_audit.schema import SCHEMA_VERSION
 from bh_fastapi_audit.sinks.base import AuditSink
 
-# HTTP method to action type mapping
 HTTP_METHOD_TO_ACTION: dict[str, str] = {
     "GET": "READ",
     "HEAD": "READ",
@@ -27,67 +42,51 @@ HTTP_METHOD_TO_ACTION: dict[str, str] = {
     "DELETE": "DELETE",
 }
 
-SCHEMA_VERSION = "1.0"
-
-# Headers that are safe to extract for correlation
-# Authorization, Cookie, and other sensitive headers are explicitly excluded
-_SAFE_CORRELATION_HEADERS = frozenset({
-    "x-request-id",
-    "x-trace-id",
-    "traceparent",
-    "x-session-id",
-})
-
 _SCALAR_TYPES = (str, int, float, bool, type(None))
-
-# Hard cap for header-sourced string values (correlation IDs, user-agent).
-# Prevents unbounded user-controlled input from inflating audit events.
 _MAX_HEADER_VALUE_LENGTH = 256
+_DENIED_STATUS_CODES = frozenset({401, 403})
 
 
-@dataclass
+@dataclass(frozen=True)
 class AuditConfig:
-    """
-    Configuration for the audit middleware.
+    """Configuration for the audit middleware.
 
-    Attributes:
-        service_name: Name of the service emitting audit events.
-        service_environment: Environment (prod, staging, dev, etc.).
-        service_version: Optional version string for the service.
-        default_actor_id: Default actor ID when no user is authenticated.
-        default_actor_type: Default actor type ("human" or "service").
-        get_actor: Optional callback to extract actor from request.
-        get_resource: Optional callback to extract resource from request/response.
-        get_metadata: Optional callback to provide custom metadata.
-        metadata_allowlist: Set of allowed metadata keys. Empty = no metadata.
-        excluded_paths: Paths to skip auditing.
-        emit_failure_mode: How to handle sink emission failures ("silent", "log", "raise").
-        failure_logger_name: Logger name used for internal failure diagnostics.
-        max_metadata_value_length: Maximum string length for metadata values before truncation.
-        include_client_ip: Whether to include client IP address in emitted events.
+    Frozen after creation to prevent runtime mutation of security
+    settings (e.g. ``metadata_allowlist``).
     """
 
     service_name: str
     service_environment: str = "unknown"
     service_version: str | None = None
     default_actor_id: str = "unknown"
-    default_actor_type: str = "service"
+    default_actor_type: Literal["human", "service"] = "service"
     get_actor: Callable[[Request], dict[str, Any] | None] | None = None
-    get_resource: Callable[[Request, Response], dict[str, Any] | None] | None = None
-    get_metadata: Callable[[Request, Response], dict[str, Any] | None] | None = None
-    metadata_allowlist: set[str] = field(default_factory=set)
-    excluded_paths: set[str] = field(default_factory=lambda: {"/health", "/healthz", "/ready"})
+    get_action: Callable[[Request], dict[str, Any] | None] | None = None
+    get_resource: Callable[[Request, int], dict[str, Any] | None] | None = None
+    get_metadata: Callable[[Request, int], dict[str, Any] | None] | None = None
+    metadata_allowlist: frozenset[str] = field(default_factory=frozenset)
+    excluded_paths: frozenset[str] = field(
+        default_factory=lambda: frozenset({"/health", "/healthz", "/ready"}),
+    )
     emit_failure_mode: Literal["silent", "log", "raise"] = "log"
     failure_logger_name: str = "bh.audit.internal"
     max_metadata_value_length: int = 200
     include_client_ip: bool = False
+    emit_mode: Literal["sync", "queue"] = "queue"
+    queue_size: int = 10_000
+    queue_drain_timeout: float = 5.0
+
+    def __post_init__(self) -> None:
+        if isinstance(self.metadata_allowlist, set):
+            object.__setattr__(self, "metadata_allowlist", frozenset(self.metadata_allowlist))
+        if isinstance(self.excluded_paths, set):
+            object.__setattr__(self, "excluded_paths", frozenset(self.excluded_paths))
 
 
-class AuditMiddleware(BaseHTTPMiddleware):
-    """
-    FastAPI middleware that emits audit events for each request.
+class AuditMiddleware:
+    """Pure ASGI middleware that emits audit events for each HTTP request.
 
-    Events conform to bh-audit-schema v1.0.
+    Events conform to bh-audit-schema v1.1.
 
     PHI Safety Guarantees:
     - Never reads or logs request/response bodies
@@ -102,27 +101,87 @@ class AuditMiddleware(BaseHTTPMiddleware):
         sink: AuditSink,
         config: AuditConfig,
     ) -> None:
-        """
-        Initialize the audit middleware.
-
-        Args:
-            app: The ASGI application.
-            sink: The audit sink to emit events to.
-            config: Audit configuration.
-        """
-        super().__init__(app)
+        self.app = app
         self.sink = sink
         self.config = config
         self._stats = AuditStats()
         self._failure_log = logging.getLogger(config.failure_logger_name)
+        self._queue: EmitQueue | None = None
+        if config.emit_mode == "queue":
+            self._queue = EmitQueue(
+                sink,
+                self._stats,
+                maxsize=config.queue_size,
+                emit_failure_mode=config.emit_failure_mode,
+                failure_logger=self._failure_log,
+            )
 
     @property
     def stats(self) -> AuditStats:
         """Return the internal emission counters."""
         return self._stats
 
+    async def shutdown(self) -> None:
+        """Drain the async emit queue (call on app shutdown)."""
+        if self._queue is not None:
+            await self._queue.shutdown(timeout=self.config.queue_drain_timeout)
+
+    # ------------------------------------------------------------------
+    # ASGI entry point
+    # ------------------------------------------------------------------
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path: str = scope.get("path", "")
+        if path in self.config.excluded_paths:
+            await self.app(scope, receive, send)
+            return
+
+        start_time = datetime.now(UTC)
+        response_status: int = 500
+        exc_info: tuple[str, str, int] | None = None
+
+        async def send_wrapper(message: dict[str, Any]) -> None:
+            nonlocal response_status
+            if message["type"] == "http.response.start":
+                response_status = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", 500)
+            exc_info = (
+                exc.__class__.__name__,
+                sanitize_error_message(str(exc)),
+                status_code,
+            )
+            raise
+        finally:
+            try:
+                event = self._build_event(
+                    scope,
+                    response_status,
+                    start_time,
+                    exc_info,
+                )
+                self._safe_emit(event)
+            except Exception:
+                self._stats.increment("emit_failures_total")
+
+    # ------------------------------------------------------------------
+    # Emission
+    # ------------------------------------------------------------------
+
     def _safe_emit(self, event: dict[str, Any]) -> None:
-        """Emit via sink with failure isolation governed by config."""
+        """Emit via queue (non-blocking) or direct sink call."""
+        if self._queue is not None:
+            self._queue.enqueue(event)
+            return
+
         try:
             self.sink.emit(event)
         except Exception as exc:
@@ -142,189 +201,121 @@ class AuditMiddleware(BaseHTTPMiddleware):
         else:
             self._stats.increment("events_emitted_total")
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:  # type: ignore[type-arg]
-        """Process request and emit audit event."""
-        # Skip excluded paths
-        if request.url.path in self.config.excluded_paths:
-            return await call_next(request)
-
-        # Capture request start time
-        start_time = datetime.now(UTC)
-
-        # Track exception info for audit event: (error_type, message, status_code)
-        exc_info: tuple[str, str, int] | None = None
-
-        try:
-            # Process request
-            response: Response = await call_next(request)
-        except Exception as exc:
-            # Preserve real status code from HTTPException instead of assuming 500
-            status_code = getattr(exc, "status_code", 500)
-            exc_info = (
-                exc.__class__.__name__,
-                sanitize_error_message(str(exc)),
-                status_code,
-            )
-            # Re-raise to let FastAPI handle the error response
-            raise
-        else:
-            # Build and emit audit event for successful processing
-            event = self._build_event(request, response, start_time, exc_info=None)
-            self._safe_emit(event)
-            return response
-        finally:
-            if exc_info is not None:
-                try:
-                    event = self._build_event(
-                        request,
-                        response=None,
-                        timestamp=start_time,
-                        exc_info=exc_info,
-                    )
-                    self._safe_emit(event)
-                except Exception:
-                    self._stats.increment("emit_failures_total")
+    # ------------------------------------------------------------------
+    # Event construction
+    # ------------------------------------------------------------------
 
     def _build_event(
         self,
-        request: Request,
-        response: Response | None,
+        scope: dict[str, Any],
+        status_code: int,
         timestamp: datetime,
         exc_info: tuple[str, str, int] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Build an audit event from request/response data.
+    ) -> AuditEvent:
+        request = Request(scope)
 
-        Args:
-            request: The incoming request.
-            response: The response being sent (None if exception occurred).
-            timestamp: When the request started.
-            exc_info: Optional tuple of (error_type, sanitized_message, status_code).
-
-        Returns:
-            An audit event dictionary conforming to bh-audit-schema.
-        """
-        event: dict[str, Any] = {
+        event: AuditEvent = {
             "schema_version": SCHEMA_VERSION,
             "event_id": str(uuid.uuid4()),
-            "timestamp": timestamp.isoformat().replace("+00:00", "Z"),
+            "timestamp": timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "service": self._build_service(),
             "actor": self._build_actor(request),
             "action": self._build_action(request),
-            "resource": self._build_resource(request, response),
-            "http": self._build_http(request, response, exc_info),
-            "outcome": self._build_outcome(response, exc_info),
+            "resource": self._build_resource(request, status_code),
+            "http": self._build_http(request, status_code, exc_info),
+            "outcome": self._build_outcome(status_code, exc_info),
         }
 
-        # Add correlation if available
         correlation = self._build_correlation(request)
         if correlation:
             event["correlation"] = correlation
 
-        # Add metadata if configured and allowlisted
-        metadata = self._build_metadata(request, response)
+        metadata = self._build_metadata(request, status_code)
         if metadata:
             event["metadata"] = metadata
 
         return event
 
-    def _build_service(self) -> dict[str, Any]:
-        """Build the service block."""
-        service: dict[str, Any] = {
+    def _build_service(self) -> ServiceBlock:
+        service: ServiceBlock = {
             "name": self.config.service_name,
             "environment": self.config.service_environment,
         }
-
         if self.config.service_version:
             service["version"] = self.config.service_version
-
         return service
 
-    def _build_actor(self, request: Request) -> dict[str, Any]:
-        """
-        Build the actor block.
-
-        Uses custom get_actor callback if provided, otherwise returns defaults.
-        Callback failures are isolated — they never break request processing.
-        """
+    def _build_actor(self, request: Request) -> ActorBlock:
         if self.config.get_actor:
             try:
                 custom_actor = self.config.get_actor(request)
                 if custom_actor:
-                    return custom_actor
+                    return custom_actor  # type: ignore[return-value]
             except Exception as exc:
                 self._stats.increment("callback_failures_total")
                 self._failure_log.warning(
-                    "get_actor callback failed, falling back to defaults: %s", exc,
+                    "get_actor callback failed, falling back to defaults: %s",
+                    exc,
                 )
-
         return {
             "subject_id": self.config.default_actor_id,
             "subject_type": self.config.default_actor_type,
         }
 
-    def _build_action(self, request: Request) -> dict[str, Any]:
-        """Build the action block from HTTP method."""
+    def _build_action(self, request: Request) -> ActionBlock:
+        if self.config.get_action:
+            try:
+                custom_action = self.config.get_action(request)
+                if custom_action:
+                    result = dict(custom_action)
+                    result.setdefault("type", HTTP_METHOD_TO_ACTION.get(request.method, "OTHER"))
+                    result.setdefault("data_classification", "UNKNOWN")
+                    return result  # type: ignore[return-value]
+            except Exception as exc:
+                self._stats.increment("callback_failures_total")
+                self._failure_log.warning(
+                    "get_action callback failed, falling back to defaults: %s",
+                    exc,
+                )
         action_type = HTTP_METHOD_TO_ACTION.get(request.method, "OTHER")
-
         return {
-            "type": action_type,
+            "type": action_type,  # type: ignore[typeddict-item]
             "data_classification": "UNKNOWN",
         }
 
-    def _build_resource(self, request: Request, response: Response | None) -> dict[str, Any]:
-        """
-        Build the resource block.
-
-        Uses custom get_resource callback if provided, otherwise defaults.
-        Callback failures are isolated — they never break request processing.
-        """
-        if self.config.get_resource and response is not None:
+    def _build_resource(self, request: Request, status_code: int) -> dict[str, Any]:
+        if self.config.get_resource:
             try:
-                custom_resource = self.config.get_resource(request, response)
+                custom_resource = self.config.get_resource(request, status_code)
                 if custom_resource:
                     return custom_resource
             except Exception as exc:
                 self._stats.increment("callback_failures_total")
                 self._failure_log.warning(
-                    "get_resource callback failed, falling back to defaults: %s", exc,
+                    "get_resource callback failed, falling back to defaults: %s",
+                    exc,
                 )
 
-        # Default: derive resource type from route or use "Unknown"
-        route = getattr(request, "scope", {}).get("route")
+        route = self._resolve_route(request)
         if route and hasattr(route, "name") and route.name:
             return {"type": route.name}
-
         return {"type": "Unknown"}
 
     def _build_http(
         self,
         request: Request,
-        response: Response | None,
+        status_code: int,
         exc_info: tuple[str, str, int] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Build the HTTP context block.
-
-        PHI Safety: Only includes safe fields. Never includes:
-        - Request/response bodies
-        - Query string parameters
-        - Authorization or Cookie headers
-        - Raw URL path (uses route template instead)
-        """
-        if response is not None:
-            status_code = response.status_code
-        elif exc_info is not None:
+    ) -> HttpBlock:
+        if exc_info is not None:
             status_code = exc_info[2]
-        else:
-            status_code = 500
 
-        http: dict[str, Any] = {
-            "method": request.method,
+        http: HttpBlock = {
+            "method": request.method,  # type: ignore[typeddict-item]
             "status_code": status_code,
         }
 
-        route = getattr(request, "scope", {}).get("route")
+        route = self._resolve_route(request)
         http["route_template"] = route.path if (route and hasattr(route, "path")) else "unknown"
 
         if self.config.include_client_ip:
@@ -334,52 +325,50 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         user_agent = request.headers.get("user-agent")
         if user_agent:
-            if len(user_agent) > _MAX_HEADER_VALUE_LENGTH:
-                user_agent = user_agent[:_MAX_HEADER_VALUE_LENGTH] + "..."
-            http["user_agent"] = user_agent
+            http["user_agent"] = self._cap_header(user_agent)
 
         return http
 
     def _build_outcome(
         self,
-        response: Response | None,
+        status_code: int,
         exc_info: tuple[str, str, int] | None = None,
-    ) -> dict[str, Any]:
-        """
-        Build the outcome block based on response status code or exception.
-
-        If an exception occurred, includes sanitized error information.
-        """
+    ) -> OutcomeBlock:
         if exc_info is not None:
-            error_type, error_message, _status_code = exc_info
+            error_type, error_message, exc_status = exc_info
+            if exc_status in _DENIED_STATUS_CODES:
+                return {
+                    "status": "DENIED",
+                    "error_type": error_type,
+                }
             return {
                 "status": "FAILURE",
                 "error_type": error_type,
                 "error_message": error_message,
             }
 
-        if response is None:
-            return {"status": "FAILURE"}
-
-        status = "SUCCESS" if response.status_code < 400 else "FAILURE"
-        return {"status": status}
+        if status_code in _DENIED_STATUS_CODES:
+            return {
+                "status": "DENIED",
+                "error_type": f"HTTP{status_code}",
+            }
+        if status_code >= 400:
+            return {
+                "status": "FAILURE",
+                "error_type": f"HTTP{status_code}",
+                "error_message": f"HTTP {status_code} response",
+            }
+        return {"status": "SUCCESS"}
 
     @staticmethod
-    def _cap_header(value: str) -> str:
-        """Truncate a header-sourced string to the hard cap."""
-        if len(value) > _MAX_HEADER_VALUE_LENGTH:
-            return value[:_MAX_HEADER_VALUE_LENGTH] + "..."
+    def _cap_header(value: str, maxlen: int = _MAX_HEADER_VALUE_LENGTH) -> str:
+        """Truncate a header-sourced string so the output fits within *maxlen*."""
+        if len(value) > maxlen:
+            return value[: maxlen - 3] + "..."
         return value
 
-    def _build_correlation(self, request: Request) -> dict[str, Any] | None:
-        """
-        Build correlation block from safe request headers only.
-
-        PHI Safety: Only extracts from allowlisted correlation headers.
-        Never reads Authorization, Cookie, or other sensitive headers.
-        All values are length-capped to prevent event inflation.
-        """
-        correlation: dict[str, Any] = {}
+    def _build_correlation(self, request: Request) -> CorrelationBlock | None:
+        correlation: CorrelationBlock = {}
 
         request_id = request.headers.get("x-request-id")
         if request_id:
@@ -401,28 +390,21 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         return correlation if correlation else None
 
-    def _build_metadata(self, request: Request, response: Response | None) -> dict[str, Any] | None:
-        """
-        Build metadata block with strict allowlist filtering.
-
-        PHI Safety:
-        - Metadata is opt-in (empty allowlist by default)
-        - Only keys in allowlist are included
-        - Non-scalar values (dict, list, tuple, etc.) are dropped
-        - Long strings are truncated to max_metadata_value_length
-        """
+    def _build_metadata(
+        self,
+        request: Request,
+        status_code: int,
+    ) -> dict[str, Any] | None:
         if not self.config.get_metadata or not self.config.metadata_allowlist:
             return None
 
-        if response is None:
-            return None
-
         try:
-            raw_metadata = self.config.get_metadata(request, response)
+            raw_metadata = self.config.get_metadata(request, status_code)
         except Exception as exc:
             self._stats.increment("callback_failures_total")
             self._failure_log.warning(
-                "get_metadata callback failed, skipping metadata: %s", exc,
+                "get_metadata callback failed, skipping metadata: %s",
+                exc,
             )
             return None
         if not raw_metadata:
@@ -442,3 +424,17 @@ class AuditMiddleware(BaseHTTPMiddleware):
             filtered[key] = value
 
         return filtered if filtered else None
+
+    @staticmethod
+    def _resolve_route(request: Request) -> Any:
+        """Resolve the matched Starlette route from the request scope."""
+        route = request.scope.get("route")
+        if route is not None:
+            return route
+        app = request.scope.get("app")
+        if app is not None:
+            for r in getattr(app, "routes", []):
+                match, _ = r.matches(request.scope)
+                if match == Match.FULL:
+                    return r
+        return None

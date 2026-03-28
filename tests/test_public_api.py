@@ -12,6 +12,7 @@ def test_public_api_imports():
         AuditConfig,
         AuditMiddleware,
         AuditSink,
+        EmitQueue,
         JsonlFileSink,
         LoggingSink,
         MemorySink,
@@ -20,32 +21,59 @@ def test_public_api_imports():
         sanitize_error_message,
     )
 
-    # Verify these are the actual classes/functions, not None or placeholders
     assert AuditMiddleware is not None
     assert AuditConfig is not None
     assert AuditSink is not None
     assert MemorySink is not None
     assert JsonlFileSink is not None
     assert LoggingSink is not None
+    assert EmitQueue is not None
     assert callable(sanitize_error_message)
     assert callable(contains_phi_tokens)
     assert callable(redact_tokens)
+
+
+def test_typed_event_blocks_importable():
+    """TypedDict event blocks should be importable from the top-level package."""
+    from bh_fastapi_audit import (
+        ActionBlock,
+        ActionType,
+        ActorBlock,
+        ActorType,
+        AuditEvent,
+        CorrelationBlock,
+        DataClassification,
+        HttpBlock,
+        OutcomeBlock,
+        OutcomeStatus,
+        ResourceBlock,
+        ServiceBlock,
+    )
+
+    assert ActionBlock is not None
+    assert ActionType is not None
+    assert ActorBlock is not None
+    assert ActorType is not None
+    assert AuditEvent is not None
+    assert CorrelationBlock is not None
+    assert DataClassification is not None
+    assert HttpBlock is not None
+    assert OutcomeBlock is not None
+    assert OutcomeStatus is not None
+    assert ResourceBlock is not None
+    assert ServiceBlock is not None
 
 
 def test_sqlalchemy_sink_import():
     """SQLAlchemySink should be importable (may be None if sqlalchemy not installed)."""
     from bh_fastapi_audit import SQLAlchemySink
 
-    # SQLAlchemySink may be None if sqlalchemy is not installed,
-    # but the import itself should not fail
-    # When sqlalchemy IS installed, it should be the actual class
     try:
         import sqlalchemy  # noqa: F401
 
         assert SQLAlchemySink is not None
         assert hasattr(SQLAlchemySink, "emit")
     except ImportError:
-        # sqlalchemy not installed, SQLAlchemySink should be None
         assert SQLAlchemySink is None
 
 
@@ -54,7 +82,7 @@ def test_version_exposed():
     from bh_fastapi_audit import __version__
 
     assert isinstance(__version__, str)
-    assert __version__ == "0.2.2"
+    assert __version__ == "0.3.0"
 
 
 def test_all_exports_defined():
@@ -66,11 +94,27 @@ def test_all_exports_defined():
         "AuditConfig",
         "AuditMiddleware",
         "AuditStats",
+        "EmitQueue",
+        # Types
+        "ActionBlock",
+        "ActionType",
+        "ActorBlock",
+        "ActorType",
+        "AuditEvent",
+        "CorrelationBlock",
+        "DataClassification",
+        "HttpBlock",
+        "OutcomeBlock",
+        "OutcomeStatus",
+        "ResourceBlock",
+        "ServiceBlock",
+        # Sinks
         "AuditSink",
         "JsonlFileSink",
         "LoggingSink",
         "MemorySink",
         "SQLAlchemySink",
+        # Redaction
         "contains_phi_tokens",
         "redact_tokens",
         "sanitize_error_message",

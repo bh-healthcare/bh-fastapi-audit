@@ -33,10 +33,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,sqlalchemy]"
+          pip install -e ".[dev,sqlalchemy,jsonschema]"
 
       - name: Check code formatting
         run: ruff check src/ tests/
 
       - name: Run tests
         run: python -m pytest -v
+
+      - name: Schema validation smoke test
+        run: python -m pytest tests/test_schema_validation.py -v
