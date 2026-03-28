@@ -58,8 +58,8 @@ def _create_audit_table(metadata: MetaData, table_name: str) -> Table:
         # HTTP info (optional)
         Column("http_status_code", Integer, nullable=True),
         # Correlation IDs (optional)
-        Column("trace_id", String(128), nullable=True),
-        Column("request_id", String(128), nullable=True),
+        Column("trace_id", String(256), nullable=True),
+        Column("request_id", String(256), nullable=True),
         # Full event JSON for completeness
         Column("event_json", Text, nullable=False),
     )

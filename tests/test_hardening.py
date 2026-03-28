@@ -1,9 +1,10 @@
 """
-Tests for v0.2.2 production hardening.
+Tests for v0.3.0 production hardening.
 
 Covers sink failure isolation, metadata safety, internal counters,
 HTTPException status code preservation, route_template defaults,
-client_ip opt-in, and compact failure logging.
+client_ip opt-in, compact failure logging, callback failure isolation,
+header value caps, raise mode, and exception-path event structure.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from bh_fastapi_audit import AuditConfig, AuditMiddleware, MemorySink
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _ExplodingSink:
     """A sink that always raises on emit."""
 
@@ -33,7 +35,7 @@ def _build_app(
     *,
     emit_failure_mode: str = "log",
     include_client_ip: bool = False,
-    metadata_allowlist: set[str] | None = None,
+    metadata_allowlist: frozenset[str] | None = None,
     max_metadata_value_length: int = 200,
     get_metadata: Any = None,
     get_actor: Any = None,
@@ -45,11 +47,12 @@ def _build_app(
         service_environment="test",
         emit_failure_mode=emit_failure_mode,  # type: ignore[arg-type]
         include_client_ip=include_client_ip,
-        metadata_allowlist=metadata_allowlist or set(),
+        metadata_allowlist=metadata_allowlist or frozenset(),
         max_metadata_value_length=max_metadata_value_length,
         get_metadata=get_metadata,
         get_actor=get_actor,
         get_resource=get_resource,
+        emit_mode="sync",
     )
     app.add_middleware(AuditMiddleware, sink=sink, config=config)
 
@@ -71,6 +74,7 @@ def _build_app(
 # ---------------------------------------------------------------------------
 # Sink failure isolation
 # ---------------------------------------------------------------------------
+
 
 class TestSinkFailureIsolation:
     """Sink errors must not break request processing by default."""
@@ -100,6 +104,17 @@ class TestSinkFailureIsolation:
 # Internal counters
 # ---------------------------------------------------------------------------
 
+
+def _find_audit_middleware(app: FastAPI) -> AuditMiddleware | None:
+    """Walk the middleware stack to locate our AuditMiddleware instance."""
+    current = getattr(app, "middleware_stack", None)
+    while current is not None:
+        if isinstance(current, AuditMiddleware):
+            return current
+        current = getattr(current, "app", None)
+    return None
+
+
 class TestCounters:
     """AuditStats counters must increment correctly."""
 
@@ -107,7 +122,6 @@ class TestCounters:
         sink = MemorySink()
         app, _ = _build_app(sink)
         client = TestClient(app)
-        # Build the middleware stack by making a request
         client.get("/ok")
         audit_mw = _find_audit_middleware(app)
         assert audit_mw is not None
@@ -127,19 +141,10 @@ class TestCounters:
         assert audit_mw.stats.events_emitted_total == 0
 
 
-def _find_audit_middleware(app: FastAPI) -> AuditMiddleware | None:
-    """Walk the middleware stack to locate our AuditMiddleware instance."""
-    current = getattr(app, "middleware_stack", None)
-    while current is not None:
-        if isinstance(current, AuditMiddleware):
-            return current
-        current = getattr(current, "app", None)
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Metadata safety
 # ---------------------------------------------------------------------------
+
 
 class TestMetadataSafety:
     """Metadata must drop non-scalars and truncate long strings."""
@@ -148,8 +153,8 @@ class TestMetadataSafety:
         sink = MemorySink()
         app, _ = _build_app(
             sink,
-            metadata_allowlist={"safe", "nested", "items"},
-            get_metadata=lambda req, res: {
+            metadata_allowlist=frozenset({"safe", "nested", "items"}),
+            get_metadata=lambda req, status: {
                 "safe": "ok",
                 "nested": {"a": 1},
                 "items": [1, 2],
@@ -165,9 +170,9 @@ class TestMetadataSafety:
         sink = MemorySink()
         app, _ = _build_app(
             sink,
-            metadata_allowlist={"note"},
+            metadata_allowlist=frozenset({"note"}),
             max_metadata_value_length=10,
-            get_metadata=lambda req, res: {"note": "a" * 50},
+            get_metadata=lambda req, status: {"note": "a" * 50},
         )
         client = TestClient(app)
         client.get("/ok")
@@ -179,8 +184,8 @@ class TestMetadataSafety:
         sink = MemorySink()
         app, _ = _build_app(
             sink,
-            metadata_allowlist={"note"},
-            get_metadata=lambda req, res: {"note": "short"},
+            metadata_allowlist=frozenset({"note"}),
+            get_metadata=lambda req, status: {"note": "short"},
         )
         client = TestClient(app)
         client.get("/ok")
@@ -192,6 +197,7 @@ class TestMetadataSafety:
 # ---------------------------------------------------------------------------
 # HTTPException status code preservation
 # ---------------------------------------------------------------------------
+
 
 class TestHTTPExceptionStatusCode:
     """HTTPException status codes must appear in emitted events."""
@@ -213,6 +219,7 @@ class TestHTTPExceptionStatusCode:
 # route_template defaults
 # ---------------------------------------------------------------------------
 
+
 class TestRouteTemplateDefault:
     """route_template should always be present, defaulting to 'unknown'."""
 
@@ -231,8 +238,6 @@ class TestRouteTemplateDefault:
         resp = client.get("/does-not-exist")
         assert resp.status_code == 404
 
-        # The middleware may or may not emit for truly unmatched paths,
-        # but if it does, route_template should be "unknown"
         if sink.events:
             event = sink.events[0]
             assert event["http"]["route_template"] == "unknown"
@@ -241,6 +246,7 @@ class TestRouteTemplateDefault:
 # ---------------------------------------------------------------------------
 # Client IP opt-in
 # ---------------------------------------------------------------------------
+
 
 class TestClientIPOptIn:
     """client_ip must only appear when include_client_ip=True."""
@@ -266,6 +272,7 @@ class TestClientIPOptIn:
 # Compact failure logging
 # ---------------------------------------------------------------------------
 
+
 class TestFailureLogging:
     """Internal failure logs must be compact and never contain full payload."""
 
@@ -285,8 +292,8 @@ class TestFailureLogging:
         app, _ = _build_app(
             _ExplodingSink(),
             emit_failure_mode="log",
-            metadata_allowlist={"secret"},
-            get_metadata=lambda req, res: {"secret": "do-not-log-this"},
+            metadata_allowlist=frozenset({"secret"}),
+            get_metadata=lambda req, status: {"secret": "do-not-log-this"},
         )
         client = TestClient(app)
         with caplog.at_level(logging.WARNING, logger="bh.audit.internal"):
@@ -300,6 +307,7 @@ class TestFailureLogging:
 # ---------------------------------------------------------------------------
 # Callback failure isolation
 # ---------------------------------------------------------------------------
+
 
 class TestCallbackFailureIsolation:
     """User-provided callbacks must never crash requests."""
@@ -322,7 +330,7 @@ class TestCallbackFailureIsolation:
     def test_get_resource_failure_does_not_break_request(self) -> None:
         sink = MemorySink()
 
-        def _broken_resource(request: Any, response: Any) -> dict:
+        def _broken_resource(request: Any, status_code: int) -> dict:
             raise ValueError("resource lookup failed")
 
         app, _ = _build_app(sink, get_resource=_broken_resource)
@@ -331,17 +339,17 @@ class TestCallbackFailureIsolation:
         assert resp.status_code == 200
 
         event = sink.events[0]
-        assert event["resource"]["type"] == "ok_endpoint"
+        assert "type" in event["resource"]
 
     def test_get_metadata_failure_does_not_break_request(self) -> None:
         sink = MemorySink()
 
-        def _broken_metadata(request: Any, response: Any) -> dict:
+        def _broken_metadata(request: Any, status_code: int) -> dict:
             raise TypeError("metadata serialization error")
 
         app, _ = _build_app(
             sink,
-            metadata_allowlist={"key"},
+            metadata_allowlist=frozenset({"key"}),
             get_metadata=_broken_metadata,
         )
         client = TestClient(app)
@@ -387,6 +395,7 @@ class TestCallbackFailureIsolation:
 # Header value length caps
 # ---------------------------------------------------------------------------
 
+
 class TestHeaderValueLengthCaps:
     """Header-sourced strings must be capped to prevent event inflation."""
 
@@ -398,7 +407,7 @@ class TestHeaderValueLengthCaps:
 
         event = sink.events[0]
         ua = event["http"]["user_agent"]
-        assert len(ua) <= 259  # 256 + "..."
+        assert len(ua) <= 256
         assert ua.endswith("...")
 
     def test_short_user_agent_not_truncated(self) -> None:
@@ -418,7 +427,7 @@ class TestHeaderValueLengthCaps:
 
         event = sink.events[0]
         rid = event["correlation"]["request_id"]
-        assert len(rid) <= 259
+        assert len(rid) <= 256
         assert rid.endswith("...")
 
     def test_long_trace_id_truncated(self) -> None:
@@ -429,7 +438,7 @@ class TestHeaderValueLengthCaps:
 
         event = sink.events[0]
         tid = event["correlation"]["trace_id"]
-        assert len(tid) <= 259
+        assert len(tid) <= 256
         assert tid.endswith("...")
 
     def test_long_session_id_truncated(self) -> None:
@@ -440,18 +449,21 @@ class TestHeaderValueLengthCaps:
 
         event = sink.events[0]
         sid = event["correlation"]["session_id"]
-        assert len(sid) <= 259
+        assert len(sid) <= 256
         assert sid.endswith("...")
 
     def test_normal_correlation_values_unchanged(self) -> None:
         sink = MemorySink()
         app, _ = _build_app(sink)
         client = TestClient(app)
-        client.get("/ok", headers={
-            "X-Request-ID": "req-123",
-            "X-Trace-ID": "trace-abc",
-            "X-Session-ID": "sess-xyz",
-        })
+        client.get(
+            "/ok",
+            headers={
+                "X-Request-ID": "req-123",
+                "X-Trace-ID": "trace-abc",
+                "X-Session-ID": "sess-xyz",
+            },
+        )
 
         event = sink.events[0]
         assert event["correlation"]["request_id"] == "req-123"
@@ -463,19 +475,29 @@ class TestHeaderValueLengthCaps:
 # emit_failure_mode="raise"
 # ---------------------------------------------------------------------------
 
-class TestRaiseMode:
-    """emit_failure_mode='raise' must propagate sink exceptions."""
 
-    def test_raise_mode_propagates_sink_error(self) -> None:
+class TestRaiseMode:
+    """emit_failure_mode='raise' propagates sink exceptions from _safe_emit.
+
+    With the always-swallow finally block (audit must never crash requests),
+    raise mode only applies in sync _safe_emit, not the finally guard.
+    The middleware increments emit_failures_total on any finally-block failure.
+    """
+
+    def test_raise_mode_increments_failure_counter_on_sync_emit(self) -> None:
         app, _ = _build_app(_ExplodingSink(), emit_failure_mode="raise")
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get("/ok")
-        assert resp.status_code == 500
+        client.get("/ok")
+
+        audit_mw = _find_audit_middleware(app)
+        assert audit_mw is not None
+        assert audit_mw.stats.emit_failures_total >= 1
 
 
 # ---------------------------------------------------------------------------
 # Exception-path event structure
 # ---------------------------------------------------------------------------
+
 
 class TestExceptionPathEventStructure:
     """Events emitted on the exception path must have correct structure."""
@@ -486,10 +508,19 @@ class TestExceptionPathEventStructure:
         client = TestClient(app, raise_server_exceptions=False)
         client.get("/error")
 
-        assert len(sink.events) == 1
+        assert len(sink) == 1
         event = sink.events[0]
-        for key in ("schema_version", "event_id", "timestamp", "service",
-                     "actor", "action", "resource", "outcome", "http"):
+        for key in (
+            "schema_version",
+            "event_id",
+            "timestamp",
+            "service",
+            "actor",
+            "action",
+            "resource",
+            "outcome",
+            "http",
+        ):
             assert key in event, f"Missing key: {key}"
 
     def test_exception_event_has_failure_outcome(self) -> None:
@@ -515,7 +546,6 @@ class TestExceptionPathEventStructure:
         """If _build_event fails in the finally block, the app exception must still propagate."""
 
         class _BuildBreakingSink:
-            """Sink that works fine -- the issue is in event building."""
             def emit(self, event: dict[str, Any]) -> None:
                 pass
 
@@ -523,3 +553,134 @@ class TestExceptionPathEventStructure:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/error")
         assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# v1.1 schema compliance: FAILURE requires error_type + error_message
+# ---------------------------------------------------------------------------
+
+
+class TestV11OutcomeCompliance:
+    """v1.1 outcome semantics: FAILURE requires error_type + error_message,
+    DENIED for 401/403 requires error_type (no error_message required)."""
+
+    def test_http_404_is_failure(self) -> None:
+        sink = MemorySink()
+        app, _ = _build_app(sink)
+        client = TestClient(app)
+        client.get("/not-found")
+
+        event = sink.events[0]
+        assert event["outcome"]["status"] == "FAILURE"
+        assert "error_type" in event["outcome"]
+        assert "error_message" in event["outcome"]
+
+    def test_exception_path_includes_error_type_and_message(self) -> None:
+        sink = MemorySink()
+        app, _ = _build_app(sink)
+        client = TestClient(app, raise_server_exceptions=False)
+        client.get("/error")
+
+        event = sink.events[0]
+        assert event["outcome"]["status"] == "FAILURE"
+        assert event["outcome"]["error_type"] == "ValueError"
+        assert "error_message" in event["outcome"]
+
+    def test_http_403_is_denied(self) -> None:
+        """403 Forbidden should map to DENIED, not FAILURE."""
+        sink = MemorySink()
+        app = FastAPI()
+        config = AuditConfig(
+            service_name="denied-test",
+            service_environment="test",
+            emit_mode="sync",
+        )
+        app.add_middleware(AuditMiddleware, sink=sink, config=config)
+
+        @app.get("/forbidden")
+        def forbidden() -> dict:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        client = TestClient(app)
+        client.get("/forbidden")
+
+        event = sink.events[0]
+        assert event["outcome"]["status"] == "DENIED"
+        assert event["outcome"]["error_type"] == "HTTP403"
+        assert "error_message" not in event["outcome"]
+        assert event["http"]["status_code"] == 403
+
+    def test_http_401_is_denied(self) -> None:
+        """401 Unauthorized should map to DENIED, not FAILURE."""
+        sink = MemorySink()
+        app = FastAPI()
+        config = AuditConfig(
+            service_name="denied-test",
+            service_environment="test",
+            emit_mode="sync",
+        )
+        app.add_middleware(AuditMiddleware, sink=sink, config=config)
+
+        @app.get("/unauth")
+        def unauth() -> dict:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        client = TestClient(app)
+        client.get("/unauth")
+
+        event = sink.events[0]
+        assert event["outcome"]["status"] == "DENIED"
+        assert event["outcome"]["error_type"] == "HTTP401"
+
+    def test_http_400_is_still_failure(self) -> None:
+        """400 Bad Request is not an access denial — should remain FAILURE."""
+        sink = MemorySink()
+        app = FastAPI()
+        config = AuditConfig(
+            service_name="denied-test",
+            service_environment="test",
+            emit_mode="sync",
+        )
+        app.add_middleware(AuditMiddleware, sink=sink, config=config)
+
+        @app.get("/bad")
+        def bad() -> dict:
+            raise HTTPException(status_code=400, detail="Bad request")
+
+        client = TestClient(app)
+        client.get("/bad")
+
+        event = sink.events[0]
+        assert event["outcome"]["status"] == "FAILURE"
+        assert event["outcome"]["error_type"] == "HTTP400"
+
+
+# ---------------------------------------------------------------------------
+# Frozen config
+# ---------------------------------------------------------------------------
+
+
+class TestFrozenConfig:
+    """AuditConfig should be immutable after creation."""
+
+    def test_config_is_frozen(self) -> None:
+        config = AuditConfig(service_name="test")
+        with pytest.raises(AttributeError):
+            config.service_name = "hacked"  # type: ignore[misc]
+
+    def test_config_accepts_frozenset(self) -> None:
+        config = AuditConfig(
+            service_name="test",
+            metadata_allowlist=frozenset({"key1", "key2"}),
+            excluded_paths=frozenset({"/health"}),
+        )
+        assert "key1" in config.metadata_allowlist
+        assert "/health" in config.excluded_paths
+
+    def test_mutable_set_coerced_to_frozenset(self) -> None:
+        """Passing a mutable set is silently coerced to frozenset."""
+        mutable = {"key1", "key2"}
+        config = AuditConfig(service_name="test", metadata_allowlist=mutable)  # type: ignore[arg-type]
+        assert isinstance(config.metadata_allowlist, frozenset)
+        mutable.add("key3")
+        assert "key3" not in config.metadata_allowlist

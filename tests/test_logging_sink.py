@@ -75,9 +75,7 @@ class TestLoggingSink:
         record = caplog.records[0]
         assert "\n" not in record.message
 
-    def test_log_message_contains_required_fields(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_log_message_contains_required_fields(self, caplog: pytest.LogCaptureFixture) -> None:
         """Log message should contain all required audit schema fields."""
         sink = LoggingSink(logger_name="bh.audit.test", level="INFO")
 
@@ -174,9 +172,7 @@ class TestLoggingSink:
         record = caplog.records[0]
         assert getattr(record, "audit", None) is True
 
-    def test_multiple_events_multiple_records(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_multiple_events_multiple_records(self, caplog: pytest.LogCaptureFixture) -> None:
         """Multiple events should produce multiple log records."""
         sink = LoggingSink(logger_name="bh.audit.test", level="INFO")
 

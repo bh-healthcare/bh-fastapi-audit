@@ -1,8 +1,8 @@
 # bh-fastapi-audit
 
-A FastAPI middleware for emitting PHI-safe audit events for behavioral healthcare systems, designed for teams building modern healthcare APIs.
+Pure ASGI middleware for emitting PHI-safe audit events for behavioral healthcare systems, designed for teams building modern healthcare APIs.
 
-This project emits audit events conforming to the **bh-audit-schema** standard (currently v1.0):  
+This project emits audit events conforming to the **bh-audit-schema** standard (v1.1):  
 https://github.com/bh-healthcare/bh-audit-schema
 
 ## Why
@@ -15,26 +15,26 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.2.2** — Production hardening: sink failure isolation, metadata safety, internal counters.
+**Current version: v0.3.0** — Pure ASGI middleware, non-blocking async emission, typed event blocks, schema v1.1 with HIPAA/SOC compliance rules.
 
-### v0.2 (current)
-- **PyPI distribution** — `pip install bh-fastapi-audit`
-- **LoggingSink** — stdout/logging-based sink for cloud deployments
-- FastAPI middleware emitting events conforming to bh-audit-schema v1.0
+### v0.3 (current)
+- **Pure ASGI middleware** — no BaseHTTPMiddleware, supports streaming responses
+- **Non-blocking async emission** — bounded `asyncio.Queue` (default 10k events) with background drain task
+- **Typed event blocks** — `TypedDict` definitions for all event sub-blocks (`AuditEvent`, `ActorBlock`, etc.)
+- **Frozen config** — `AuditConfig` is immutable after creation
+- **Schema v1.1** — vendored bh-audit-schema v1.1 with HIPAA/SOC compliance rules, DENIED status, conditional FAILURE validation
+- **Schema validation in CI** — emitted events validated against the vendored JSON schema
+- PyPI distribution — `pip install bh-fastapi-audit`
 - PHI-safe defaults (no bodies, safe headers only, error sanitization)
-- Captures: service, actor, action, resource, outcome, correlation
+- Captures: service, actor, action, resource, outcome, correlation, metadata
 - Pluggable sinks:
-  - `MemorySink` — in-memory for testing
+  - `MemorySink` — in-memory for testing (bounded optional)
   - `JsonlFileSink` — JSON Lines file for local dev and demos
   - `LoggingSink` — Python logging for cloud platforms (CloudWatch, Cloud Logging, Azure Monitor, Kubernetes)
   - `SQLAlchemySink` — relational database storage (Postgres, SQLite, etc., via SQLAlchemy Core)
 - Redaction utilities for error message sanitization
 
-### Planned
-- Schema validation for emitted events
-- Non-blocking / async sink variants (optional)
-
-The bh-audit-schema v1.0 JSON schema is vendored into this package to enable offline validation.
+The bh-audit-schema v1.1 JSON schema is vendored into this package to enable offline validation.
 
 ## Quickstart
 
@@ -44,11 +44,11 @@ from bh_fastapi_audit import AuditMiddleware, AuditConfig, MemorySink
 
 app = FastAPI()
 
-# For testing/development - use MemorySink
 sink = MemorySink()
 config = AuditConfig(
     service_name="example-bh-api",
     service_environment="dev",
+    emit_mode="sync",  # use "queue" (default) for non-blocking in production
 )
 
 app.add_middleware(AuditMiddleware, sink=sink, config=config)
@@ -62,9 +62,9 @@ Each request emits an audit event like:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "event_id": "c1d2e3f4-1111-2222-3333-444455556666",
-  "timestamp": "2026-01-14T22:00:00Z",
+  "timestamp": "2026-03-28T12:00:00.000Z",
   "service": { "name": "example-bh-api", "environment": "dev" },
   "actor": { "subject_id": "unknown", "subject_type": "service" },
   "action": { "type": "READ", "data_classification": "UNKNOWN" },
@@ -90,6 +90,23 @@ app.add_middleware(
 ```
 
 When deployed in containers, audit events are emitted as structured JSON logs to stdout and collected by your platform logging system (CloudWatch, Cloud Logging, Azure Monitor, Fluentd, etc.). No SDK dependencies required.
+
+## Non-blocking async emission
+
+v0.3 defaults to `emit_mode="queue"` — events are enqueued without blocking the request path, then emitted by a background task:
+
+```python
+config = AuditConfig(
+    service_name="my-api",
+    emit_mode="queue",       # default — non-blocking
+    queue_size=10_000,       # default — bounded to prevent unbounded memory growth
+    queue_drain_timeout=5.0, # seconds to wait on shutdown
+)
+```
+
+When the queue is full, events are dropped and `events_dropped_total` is incremented. Call `await middleware.shutdown()` on app shutdown to drain remaining events.
+
+Use `emit_mode="sync"` for testing or when you need deterministic ordering.
 
 ## Production hardening
 
@@ -127,9 +144,9 @@ Metadata values are enforced to be scalar JSON types (`str`, `int`, `float`, `bo
 ```python
 config = AuditConfig(
     service_name="my-api",
-    metadata_allowlist={"content_length", "status_family"},
-    max_metadata_value_length=200,   # default; truncated strings end with "..."
-    get_metadata=lambda req, res: {"content_length": req.headers.get("content-length")},
+    metadata_allowlist=frozenset({"content_length", "status_family"}),
+    max_metadata_value_length=200,
+    get_metadata=lambda req, status: {"content_length": req.headers.get("content-length")},
 )
 ```
 
@@ -143,10 +160,6 @@ Track emission health via the middleware's stats:
 # {"events_emitted_total": 42, "emit_failures_total": 0, ...}
 ```
 
-### Synchronous emission
-
-Audit emission is synchronous in v0.2.x. For high-throughput systems, use `LoggingSink` (which defers I/O to your logging pipeline) or plan for async sinks in v0.3.
-
 ## Sinks
 
 Sinks determine where audit events are stored. Choose based on your deployment:
@@ -156,7 +169,8 @@ Sinks determine where audit events are stored. Choose based on your deployment:
 ```python
 from bh_fastapi_audit import MemorySink
 
-sink = MemorySink()
+sink = MemorySink()           # unbounded — for tests
+sink = MemorySink(maxlen=100) # bounded — for dev
 # After requests: sink.events contains all emitted events
 ```
 
@@ -168,18 +182,16 @@ Writes one JSON object per line. Thread-safe, flushes by default.
 from bh_fastapi_audit import JsonlFileSink
 
 sink = JsonlFileSink("/var/log/audit/events.jsonl")
-# Events appended as compact JSON lines
 ```
 
 ### LoggingSink (cloud deployments)
 
-Emits one compact JSON audit event per request using Python logging. Works with any platform that captures application stdout, including AWS CloudWatch, GCP Cloud Logging, Azure Monitor, and Kubernetes-based logging pipelines.
+Emits one compact JSON audit event per request using Python logging.
 
 ```python
 from bh_fastapi_audit import LoggingSink
 
 sink = LoggingSink(logger_name="bh.audit", level="INFO")
-# Each event emitted as a single JSON line via logging
 ```
 
 No SDK dependencies, no retries, no buffering. The cloud platform handles collection.
@@ -191,22 +203,14 @@ Stores events in a relational database with query-friendly columns plus full JSO
 ```python
 from bh_fastapi_audit import SQLAlchemySink
 
-# PostgreSQL
 sink = SQLAlchemySink("postgresql://user:pass@localhost/mydb")
-
-# SQLite (for local testing)
-sink = SQLAlchemySink("sqlite:///audit.db")
 ```
-
-The sink creates a `bh_audit_events` table with indexed columns for common compliance queries:
-- `timestamp`, `patient_id`, `actor_subject_id`, `action_type`, `outcome_status`
-- Full event stored in `event_json` column
 
 See [docs/indexing.md](docs/indexing.md) for recommended database indexes and query examples.
 
 ## Configuration
 
-`AuditConfig` supports:
+`AuditConfig` supports (frozen after creation):
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -216,14 +220,17 @@ See [docs/indexing.md](docs/indexing.md) for recommended database indexes and qu
 | `default_actor_id` | `"unknown"` | Default actor when no auth context |
 | `default_actor_type` | `"service"` | Default actor type (`"human"` or `"service"`) |
 | `get_actor` | `None` | Callback `(Request) -> dict` for custom actor extraction |
-| `get_resource` | `None` | Callback `(Request, Response) -> dict` for custom resource extraction |
-| `get_metadata` | `None` | Callback `(Request, Response) -> dict` for custom metadata |
-| `metadata_allowlist` | `set()` | Set of allowed metadata keys (empty = no metadata) |
-| `excluded_paths` | `{"/health", "/healthz", "/ready"}` | Paths to skip auditing |
-| `emit_failure_mode` | `"log"` | How to handle sink failures (`"silent"`, `"log"`, `"raise"`) |
-| `failure_logger_name` | `"bh.audit.internal"` | Logger name for internal failure diagnostics |
-| `max_metadata_value_length` | `200` | Max string length for metadata values before truncation |
-| `include_client_ip` | `False` | Whether to include client IP in emitted events |
+| `get_resource` | `None` | Callback `(Request, int) -> dict` for custom resource extraction |
+| `get_metadata` | `None` | Callback `(Request, int) -> dict` for custom metadata |
+| `metadata_allowlist` | `frozenset()` | Allowed metadata keys (empty = no metadata) |
+| `excluded_paths` | `frozenset({"/health", ...})` | Paths to skip auditing |
+| `emit_failure_mode` | `"log"` | How to handle sink failures |
+| `failure_logger_name` | `"bh.audit.internal"` | Logger name for internal diagnostics |
+| `max_metadata_value_length` | `200` | Max string length for metadata values |
+| `include_client_ip` | `False` | Whether to include client IP |
+| `emit_mode` | `"queue"` | `"sync"` or `"queue"` (non-blocking) |
+| `queue_size` | `10_000` | Maximum pending events in queue |
+| `queue_drain_timeout` | `5.0` | Seconds to wait for queue drain on shutdown |
 
 ## PHI-safe defaults
 
@@ -236,55 +243,6 @@ This library is designed to be safe by default:
 
 PHI safety is enforced by tests that assert synthetic PHI tokens never appear in emitted events.
 
-### Error message sanitization
-
-When exceptions occur, error messages are automatically sanitized:
-
-```python
-from bh_fastapi_audit import sanitize_error_message
-
-# Patterns like SSNs, emails, phone numbers are redacted
-sanitize_error_message("Patient SSN 123-45-6789 invalid")
-# → "Patient SSN [REDACTED-SSN] invalid"
-
-# Long messages are truncated (default 200 chars)
-sanitize_error_message("x" * 500)
-# → "xxxx...xxx..."
-```
-
-### Metadata allowlist
-
-Metadata is opt-in and strictly filtered:
-
-```python
-config = AuditConfig(
-    service_name="my-api",
-    get_metadata=lambda req, res: {
-        "content_length": req.headers.get("content-length"),
-        "status_family": f"{res.status_code // 100}xx",
-        "notes": "sensitive",
-    },
-    metadata_allowlist={"content_length", "status_family"},  # Only these keys appear
-)
-```
-
-## Performance
-
-Audit emission is synchronous in v0.2.x. For high-throughput systems, use `LoggingSink` or a non-blocking sink (planned for v0.3).
-
-## Scope and non-goals
-
-**In scope:**
-
-- Structured audit events designed for compliance and operational monitoring
-- Correlation support (request_id / trace_id) to connect events across services
-
-**Out of scope:**
-
-- Legal compliance guarantees
-- Storing raw PHI or clinical content in logs
-- Opinionated IAM or authentication frameworks
-
 ## Installation
 
 **Requires Python 3.11+**
@@ -296,8 +254,8 @@ pip install bh-fastapi-audit
 ### Optional dependencies
 
 ```bash
-# For SQLAlchemy sink (production database storage)
-pip install bh-fastapi-audit[sqlalchemy]
+pip install bh-fastapi-audit[sqlalchemy]    # Database sink
+pip install bh-fastapi-audit[jsonschema]    # Full JSON schema validation
 ```
 
 ### Development installation
@@ -307,7 +265,7 @@ git clone https://github.com/bh-healthcare/bh-fastapi-audit
 cd bh-fastapi-audit
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev,sqlalchemy]"
+pip install -e ".[dev,sqlalchemy,jsonschema]"
 ```
 
 ## License

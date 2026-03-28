@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bh-fastapi-audit"
-version = "0.2.2"
-description = "FastAPI middleware for emitting PHI-safe audit events for behavioral healthcare systems"
+version = "0.3.0"
+description = "FastAPI ASGI middleware for emitting PHI-safe audit events for behavioral healthcare systems"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
@@ -42,6 +42,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
     "httpx>=0.24.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
@@ -100,4 +101,5 @@ warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
