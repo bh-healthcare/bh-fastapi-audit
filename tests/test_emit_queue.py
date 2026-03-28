@@ -3,13 +3,13 @@ Tests for the async EmitQueue — the default production emission path.
 
 Covers: enqueue, queue-full drop, shutdown drain, drain timeout,
 sink failure during background drain, and processing order.
+
+asyncio_mode = "auto" in pyproject.toml handles async test discovery.
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-import pytest
 
 from bh_fastapi_audit._queue import EmitQueue
 from bh_fastapi_audit._stats import AuditStats
@@ -32,7 +32,6 @@ def _make_event(event_id: str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee") -> dict[
 class TestEmitQueueBasic:
     """Basic enqueue / drain behaviour."""
 
-    @pytest.mark.asyncio
     async def test_enqueued_events_reach_sink(self) -> None:
         sink = MemorySink()
         stats = AuditStats()
@@ -45,7 +44,6 @@ class TestEmitQueueBasic:
         assert len(sink) == 2
         assert stats.events_emitted_total == 2
 
-    @pytest.mark.asyncio
     async def test_processing_preserves_order(self) -> None:
         sink = MemorySink()
         stats = AuditStats()
@@ -63,15 +61,12 @@ class TestEmitQueueBasic:
 class TestQueueFullDrop:
     """When the queue is full, events must be dropped with counter increment."""
 
-    @pytest.mark.asyncio
     async def test_drop_when_full(self) -> None:
         sink = MemorySink()
         stats = AuditStats()
         q = EmitQueue(sink, stats, maxsize=2)
 
-        # Pause the drain task so the queue fills up
         q.start()
-        # Fill the queue beyond capacity — put_nowait raises QueueFull
         q._queue.put_nowait(_make_event("e1"))
         q._queue.put_nowait(_make_event("e2"))
 
@@ -81,7 +76,6 @@ class TestQueueFullDrop:
 
         await q.shutdown(timeout=2.0)
 
-    @pytest.mark.asyncio
     async def test_enqueue_returns_true_when_space(self) -> None:
         sink = MemorySink()
         stats = AuditStats()
@@ -96,7 +90,6 @@ class TestQueueFullDrop:
 class TestSinkFailureDuringDrain:
     """Sink exceptions in the background task must be isolated."""
 
-    @pytest.mark.asyncio
     async def test_sink_failure_increments_counter(self) -> None:
         class _FailSink:
             def emit(self, event: dict[str, Any]) -> None:
@@ -111,7 +104,6 @@ class TestSinkFailureDuringDrain:
         assert stats.emit_failures_total == 1
         assert stats.events_emitted_total == 0
 
-    @pytest.mark.asyncio
     async def test_sink_failure_does_not_stop_drain(self) -> None:
         """After a sink failure, subsequent events should still be attempted."""
         call_count = 0
@@ -137,7 +129,6 @@ class TestSinkFailureDuringDrain:
 class TestShutdownDrain:
     """Graceful shutdown must drain pending events."""
 
-    @pytest.mark.asyncio
     async def test_shutdown_drains_remaining(self) -> None:
         sink = MemorySink()
         stats = AuditStats()
@@ -149,7 +140,6 @@ class TestShutdownDrain:
 
         assert len(sink) == 10
 
-    @pytest.mark.asyncio
     async def test_shutdown_idempotent(self) -> None:
         sink = MemorySink()
         stats = AuditStats()
@@ -161,13 +151,11 @@ class TestShutdownDrain:
 
         assert len(sink) == 1
 
-    @pytest.mark.asyncio
     async def test_pending_property(self) -> None:
         sink = MemorySink()
         stats = AuditStats()
         q = EmitQueue(sink, stats, maxsize=100)
 
         assert q.pending == 0
-        # Don't start drain, just check the counter
         q._queue.put_nowait(_make_event())
         assert q.pending == 1
