@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-30
+
+### Added
+
+- **Runtime event validation** — new `validate_events` config option enables JSON-schema
+  validation of every emitted event before it reaches the sink.  Configurable via
+  `validation_failure_mode` (`"drop"`, `"log_and_emit"`, `"raise"`).
+- **`AuditValidationError`** — new public exception raised when `validation_failure_mode`
+  is `"raise"` and an event fails schema validation.  Carries `event_id` and `errors`
+  attributes.
+- **`validate_event()` function** — public utility to validate an event dict against a
+  specific schema version.  Useful for testing and offline validation.
+- **Validation timing** — `AuditStats` now tracks `validation_time_ms_total` (cumulative
+  milliseconds spent on validation), exposed via `stats.snapshot()`.
+- **Denial reason callback** — new `AuditConfig.get_denial_reason` callback
+  `(Request, exc_info) -> str | None` enables setting rich `error_type` values on DENIED
+  outcomes (e.g. `"RoleDenied"`, `"ConsentRequired"`, `"CrossOrgAccessDenied"`).
+- **Configurable denied status codes** — new `AuditConfig.denied_status_codes` field
+  (default `frozenset({401, 403})`) controls which HTTP status codes produce DENIED
+  outcomes.
+- **Schema negotiation** — new `AuditConfig.target_schema_version` field (`"1.0"` or
+  `"1.1"`, default `"1.1"`) controls which schema version appears in emitted events.
+  When set to `"1.0"`, DENIED outcomes are automatically downgraded to FAILURE.
+- **Vendored v1.0 schema** — `schema/versions/1.0/audit_event.schema.json` now bundled
+  alongside v1.1 for offline validation of both versions.
+- **Version-aware schema loading** — `get_schema_path(version)` and
+  `load_schema(version)` accept an explicit version parameter.
+- **Example events** — four example JSON files in `examples/`: service-to-service,
+  access-denied-role, access-denied-consent, cross-org-access-denied.
+- **Migration guide** — `docs/migrating-1.0-to-1.1.md` documents the schema differences
+  and gradual migration path using `target_schema_version`.
+
+### Changed
+
+- **`jsonschema` is now a required dependency** — moved from optional extras to core
+  `dependencies` (`jsonschema>=4.20,<5`).  The `[jsonschema]` extra is kept for
+  backward compatibility but is now a no-op.
+- `_build_outcome` now accepts a `request` parameter to support the denial reason
+  callback.
+- `_DENIED_STATUS_CODES` module-level constant removed; replaced by
+  `AuditConfig.denied_status_codes` instance field.
+- `_build_event` now uses `self.config.target_schema_version` instead of the
+  `SCHEMA_VERSION` constant.
+
+### Compatibility
+
+- Python 3.11+ unchanged.
+- No breaking changes to the default emitted event shape — existing consumers see
+  identical events unless new config options are opted into.
+- `AuditConfig` gains five new optional fields (all have safe defaults).
+- The `[jsonschema]` extra is now redundant but still installable.
+
 ## [0.3.0] - 2026-03-28
 
 ### Added
@@ -219,7 +271,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Apache 2.0 license
 - Vendored bh-audit-schema v1.0 JSON schema
 
-[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.0...v0.2.1

@@ -9,6 +9,7 @@ avoids known Starlette issues, and reduces per-request overhead.
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -30,7 +31,6 @@ from bh_fastapi_audit._types import (
     ServiceBlock,
 )
 from bh_fastapi_audit.redaction import sanitize_error_message
-from bh_fastapi_audit.schema import SCHEMA_VERSION
 from bh_fastapi_audit.sinks.base import AuditSink
 
 HTTP_METHOD_TO_ACTION: dict[str, str] = {
@@ -44,7 +44,14 @@ HTTP_METHOD_TO_ACTION: dict[str, str] = {
 
 _SCALAR_TYPES = (str, int, float, bool, type(None))
 _MAX_HEADER_VALUE_LENGTH = 256
-_DENIED_STATUS_CODES = frozenset({401, 403})
+
+
+class _AuditValidationRaise(Exception):
+    """Internal wrapper so validation_failure_mode="raise" escapes the finally block."""
+
+    def __init__(self, cause: Exception) -> None:
+        self.cause = cause
+        super().__init__(str(cause))
 
 
 @dataclass(frozen=True)
@@ -75,18 +82,28 @@ class AuditConfig:
     emit_mode: Literal["sync", "queue"] = "queue"
     queue_size: int = 10_000
     queue_drain_timeout: float = 5.0
+    validate_events: bool = False
+    validation_failure_mode: Literal["drop", "log_and_emit", "raise"] = "drop"
+    get_denial_reason: Callable[[Any, Any], str | None] | None = None
+    denied_status_codes: frozenset[int] = field(
+        default_factory=lambda: frozenset({401, 403}),
+    )
+    target_schema_version: Literal["1.0", "1.1"] = "1.1"
 
     def __post_init__(self) -> None:
         if isinstance(self.metadata_allowlist, set):
             object.__setattr__(self, "metadata_allowlist", frozenset(self.metadata_allowlist))
         if isinstance(self.excluded_paths, set):
             object.__setattr__(self, "excluded_paths", frozenset(self.excluded_paths))
+        if isinstance(self.denied_status_codes, set):
+            object.__setattr__(self, "denied_status_codes", frozenset(self.denied_status_codes))
 
 
 class AuditMiddleware:
     """Pure ASGI middleware that emits audit events for each HTTP request.
 
-    Events conform to bh-audit-schema v1.1.
+    Events conform to bh-audit-schema v1.0 or v1.1 depending on
+    ``AuditConfig.target_schema_version``.
 
     PHI Safety Guarantees:
     - Never reads or logs request/response bodies
@@ -169,6 +186,8 @@ class AuditMiddleware:
                     exc_info,
                 )
                 self._safe_emit(event)
+            except _AuditValidationRaise as wrap:
+                raise wrap.cause from wrap.cause
             except Exception:
                 self._stats.increment("emit_failures_total")
 
@@ -177,7 +196,50 @@ class AuditMiddleware:
     # ------------------------------------------------------------------
 
     def _safe_emit(self, event: dict[str, Any]) -> None:
-        """Emit via queue (non-blocking) or direct sink call."""
+        """Emit via queue (non-blocking) or direct sink call.
+
+        When ``validate_events`` is enabled, the event is checked against
+        the target schema version before reaching the sink.
+        """
+        if self.config.validate_events:
+            from bh_fastapi_audit._validation import AuditValidationError, validate_event
+
+            t0 = time.perf_counter()
+            errors = validate_event(event, self.config.target_schema_version)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            self._stats.record_validation_time(elapsed_ms)
+
+            if errors:
+                self._stats.increment("validation_failures_total")
+                mode = self.config.validation_failure_mode
+
+                if mode == "raise":
+                    raise _AuditValidationRaise(AuditValidationError(event.get("event_id"), errors))
+
+                if mode == "drop":
+                    self._stats.increment("events_dropped_total")
+                    self._failure_log.warning(
+                        "Audit event dropped (validation): event_id=%s service=%s "
+                        "action=%s resource=%s error=%s",
+                        event.get("event_id"),
+                        event.get("service", {}).get("name"),
+                        event.get("action", {}).get("type"),
+                        event.get("resource", {}).get("type"),
+                        errors[0],
+                    )
+                    return
+
+                # log_and_emit: log the error but continue to emit
+                self._failure_log.warning(
+                    "Audit event validation failed (emitting anyway): event_id=%s "
+                    "service=%s action=%s resource=%s error=%s",
+                    event.get("event_id"),
+                    event.get("service", {}).get("name"),
+                    event.get("action", {}).get("type"),
+                    event.get("resource", {}).get("type"),
+                    errors[0],
+                )
+
         if self._queue is not None:
             self._queue.enqueue(event)
             return
@@ -215,7 +277,7 @@ class AuditMiddleware:
         request = Request(scope)
 
         event: AuditEvent = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": self.config.target_schema_version,
             "event_id": str(uuid.uuid4()),
             "timestamp": timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "service": self._build_service(),
@@ -223,7 +285,7 @@ class AuditMiddleware:
             "action": self._build_action(request),
             "resource": self._build_resource(request, status_code),
             "http": self._build_http(request, status_code, exc_info),
-            "outcome": self._build_outcome(status_code, exc_info),
+            "outcome": self._build_outcome(request, status_code, exc_info),
         }
 
         correlation = self._build_correlation(request)
@@ -331,27 +393,51 @@ class AuditMiddleware:
 
     def _build_outcome(
         self,
+        request: Request,
         status_code: int,
         exc_info: tuple[str, str, int] | None = None,
     ) -> OutcomeBlock:
+        denied_codes = self.config.denied_status_codes
+        downgrade_denied = self.config.target_schema_version == "1.0"
+
         if exc_info is not None:
             error_type, error_message, exc_status = exc_info
-            if exc_status in _DENIED_STATUS_CODES:
+            if exc_status in denied_codes:
+                denial_reason = self._try_denial_callback(request, exc_info)
+                resolved_type = denial_reason if denial_reason else error_type
+
+                if downgrade_denied:
+                    return {
+                        "status": "FAILURE",
+                        "error_type": resolved_type,
+                        "error_message": error_message,
+                    }
                 return {
                     "status": "DENIED",
-                    "error_type": error_type,
+                    "error_type": resolved_type,
                 }
+
             return {
                 "status": "FAILURE",
                 "error_type": error_type,
                 "error_message": error_message,
             }
 
-        if status_code in _DENIED_STATUS_CODES:
+        if status_code in denied_codes:
+            denial_reason = self._try_denial_callback(request, None)
+            resolved_type = denial_reason if denial_reason else f"HTTP{status_code}"
+
+            if downgrade_denied:
+                return {
+                    "status": "FAILURE",
+                    "error_type": resolved_type,
+                    "error_message": f"HTTP {status_code} response",
+                }
             return {
                 "status": "DENIED",
-                "error_type": f"HTTP{status_code}",
+                "error_type": resolved_type,
             }
+
         if status_code >= 400:
             return {
                 "status": "FAILURE",
@@ -359,6 +445,28 @@ class AuditMiddleware:
                 "error_message": f"HTTP {status_code} response",
             }
         return {"status": "SUCCESS"}
+
+    def _try_denial_callback(
+        self,
+        request: Request,
+        exc_info: tuple[str, str, int] | None,
+    ) -> str | None:
+        """Invoke the user-supplied denial-reason callback, if configured.
+
+        Returns the callback result on success, ``None`` on failure or
+        if no callback is configured.
+        """
+        if self.config.get_denial_reason is None:
+            return None
+        try:
+            return self.config.get_denial_reason(request, exc_info)
+        except Exception as exc:
+            self._stats.increment("callback_failures_total")
+            self._failure_log.warning(
+                "get_denial_reason callback failed: %s",
+                exc,
+            )
+            return None
 
     @staticmethod
     def _cap_header(value: str, maxlen: int = _MAX_HEADER_VALUE_LENGTH) -> str:

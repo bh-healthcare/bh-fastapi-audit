@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bh-healthcare.github.io/bh-audit-schema/1.0/audit_event.schema.json",
+  "title": "BH Audit Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "timestamp",
+    "service",
+    "actor",
+    "action",
+    "resource",
+    "outcome"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version for this audit event."
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 16,
+      "description": "Globally unique identifier for this audit event (UUID recommended)."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the audited action occurred."
+    },
+
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "description": "prod|staging|dev etc." },
+        "version": { "type": "string", "description": "Service version/build identifier." }
+      }
+    },
+
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_id": { "type": "string" },
+        "trace_id": { "type": "string" },
+        "session_id": { "type": "string" }
+      },
+      "description": "Identifiers used to correlate events across services."
+    },
+
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_id", "subject_type"],
+      "properties": {
+        "subject_id": { "type": "string", "minLength": 1 },
+        "subject_type": {
+          "type": "string",
+          "enum": ["human", "service"],
+          "description": "Whether the actor is a human user or a service principal."
+        },
+        "org_id": { "type": "string" },
+        "roles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Optional roles at time of access."
+        }
+      }
+    },
+
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["READ", "CREATE", "UPDATE", "DELETE", "EXPORT", "LOGIN", "LOGOUT", "PRINT", "OTHER"]
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional specific action name (e.g., 'verify_insurance', 'sign_bps')."
+        },
+        "phi_touched": {
+          "type": "boolean",
+          "description": "True if the action touches regulated PHI (behavioral health context)."
+        },
+        "data_classification": {
+          "type": "string",
+          "enum": ["PHI", "PII", "NONE", "UNKNOWN"],
+          "default": "UNKNOWN"
+        }
+      }
+    },
+
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1, "description": "E.g., Patient, Note, Encounter, Appointment, Program." },
+        "id": { "type": "string", "description": "Resource identifier if applicable." },
+        "patient_id": { "type": "string", "description": "Patient identifier if applicable. Recommended for PHI-touching actions." }
+      }
+    },
+
+    "http": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": { "type": "string" },
+        "route_template": { "type": "string", "description": "Template path, not raw path (e.g., /patients/{patient_id}/notes/{note_id})." },
+        "status_code": { "type": "integer" },
+        "client_ip": { "type": "string" },
+        "user_agent": { "type": "string" }
+      }
+    },
+
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["SUCCESS", "FAILURE"] },
+        "error_type": { "type": "string" },
+        "error_message": {
+          "type": "string",
+          "description": "Sanitized error message. Must not contain PHI."
+        }
+      }
+    },
+
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event_hash": { "type": "string" },
+        "prev_event_hash": { "type": "string" },
+        "hash_alg": { "type": "string", "description": "Optional (e.g., sha256)." }
+      },
+      "description": "Optional tamper-evident chaining fields."
+    },
+
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Optional safe metadata. Must not include raw PHI."
+    }
+  }
+}
+

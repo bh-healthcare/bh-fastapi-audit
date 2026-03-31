@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.1",
+  "event_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "timestamp": "2026-03-30T14:00:00.000Z",
+  "service": {
+    "name": "scheduling-api",
+    "environment": "prod",
+    "version": "2.4.1"
+  },
+  "actor": {
+    "subject_id": "svc-intake-portal",
+    "subject_type": "service"
+  },
+  "action": {
+    "type": "READ",
+    "data_classification": "PHI"
+  },
+  "resource": {
+    "type": "Appointment",
+    "id": "appt-98765"
+  },
+  "http": {
+    "method": "GET",
+    "route_template": "/appointments/{appointment_id}",
+    "status_code": 200
+  },
+  "outcome": {
+    "status": "SUCCESS"
+  },
+  "correlation": {
+    "request_id": "req-aabb-ccdd",
+    "trace_id": "0af7651916cd43dd8448eb211c80319c"
+  }
+}

@@ -15,9 +15,17 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.3.0** — Pure ASGI middleware, non-blocking async emission, typed event blocks, schema v1.1 with HIPAA/SOC compliance rules.
+**Current version: v0.4.0** — Runtime validation, DENIED outcome with denial callbacks, schema negotiation (v1.0/v1.1), vendored dual-schema support.
 
-### v0.3 (current)
+### v0.4 (current)
+- **Runtime event validation** — optional `validate_events=True` checks every event against the vendored JSON schema before emission, with configurable failure modes (`drop`, `log_and_emit`, `raise`)
+- **DENIED outcome with denial callback** — `get_denial_reason` callback provides rich denial categories (e.g. `RoleDenied`, `ConsentRequired`, `CrossOrgAccessDenied`) for compliance queries
+- **Configurable denied status codes** — `denied_status_codes` config (default `{401, 403}`)
+- **Schema negotiation** — `target_schema_version` config (`"1.0"` or `"1.1"`) controls which schema version is emitted, enabling gradual migration
+- **Vendored dual schemas** — both v1.0 and v1.1 schemas bundled for offline validation
+- **Validation timing** — `validation_time_ms_total` counter for monitoring validation overhead
+
+### v0.3
 - **Pure ASGI middleware** — no BaseHTTPMiddleware, supports streaming responses
 - **Non-blocking async emission** — bounded `asyncio.Queue` (default 10k events) with background drain task
 - **Typed event blocks** — `TypedDict` definitions for all event sub-blocks (`AuditEvent`, `ActorBlock`, etc.)
@@ -34,7 +42,7 @@ This project is an implementation layer that turns the bh-audit-schema standard 
   - `SQLAlchemySink` — relational database storage (Postgres, SQLite, etc., via SQLAlchemy Core)
 - Redaction utilities for error message sanitization
 
-The bh-audit-schema v1.1 JSON schema is vendored into this package to enable offline validation.
+The bh-audit-schema v1.0 and v1.1 JSON schemas are vendored into this package to enable offline validation.
 
 ## Quickstart
 
@@ -208,6 +216,56 @@ sink = SQLAlchemySink("postgresql://user:pass@localhost/mydb")
 
 See [docs/indexing.md](docs/indexing.md) for recommended database indexes and query examples.
 
+## Runtime Event Validation
+
+v0.4 adds optional runtime validation against the vendored JSON schema:
+
+```python
+config = AuditConfig(
+    service_name="my-api",
+    validate_events=True,                       # enable validation
+    validation_failure_mode="log_and_emit",      # "drop" (default), "log_and_emit", or "raise"
+)
+```
+
+- `"drop"` — increment counters and silently discard invalid events
+- `"log_and_emit"` — log validation errors but still emit the event
+- `"raise"` — raise `AuditValidationError` (use in dev/test)
+
+Validation timing is tracked in `stats.snapshot()["validation_time_ms_total"]`.
+
+## DENIED Outcome and Denial Callbacks
+
+HTTP 401/403 produce `outcome.status: "DENIED"` (v1.1) with an `error_type`.
+Provide a callback for richer denial categories:
+
+```python
+def denial_reason(request, exc_info):
+    if exc_info and "consent" in exc_info[0].lower():
+        return "ConsentRequired"
+    return None  # fall back to default
+
+config = AuditConfig(
+    service_name="my-api",
+    get_denial_reason=denial_reason,
+    denied_status_codes=frozenset({401, 403, 451}),  # customize
+)
+```
+
+## Schema Negotiation
+
+Control which schema version emitted events conform to:
+
+```python
+config = AuditConfig(
+    service_name="my-api",
+    target_schema_version="1.0",  # or "1.1" (default)
+)
+```
+
+With `"1.0"`, DENIED outcomes are downgraded to FAILURE for backward compatibility.
+See [docs/migrating-1.0-to-1.1.md](docs/migrating-1.0-to-1.1.md) for a full migration guide.
+
 ## Configuration
 
 `AuditConfig` supports (frozen after creation):
@@ -220,6 +278,7 @@ See [docs/indexing.md](docs/indexing.md) for recommended database indexes and qu
 | `default_actor_id` | `"unknown"` | Default actor when no auth context |
 | `default_actor_type` | `"service"` | Default actor type (`"human"` or `"service"`) |
 | `get_actor` | `None` | Callback `(Request) -> dict` for custom actor extraction |
+| `get_action` | `None` | Callback `(Request) -> dict` for custom action extraction |
 | `get_resource` | `None` | Callback `(Request, int) -> dict` for custom resource extraction |
 | `get_metadata` | `None` | Callback `(Request, int) -> dict` for custom metadata |
 | `metadata_allowlist` | `frozenset()` | Allowed metadata keys (empty = no metadata) |
@@ -231,6 +290,11 @@ See [docs/indexing.md](docs/indexing.md) for recommended database indexes and qu
 | `emit_mode` | `"queue"` | `"sync"` or `"queue"` (non-blocking) |
 | `queue_size` | `10_000` | Maximum pending events in queue |
 | `queue_drain_timeout` | `5.0` | Seconds to wait for queue drain on shutdown |
+| `validate_events` | `False` | Enable runtime JSON-schema validation |
+| `validation_failure_mode` | `"drop"` | `"drop"`, `"log_and_emit"`, or `"raise"` |
+| `get_denial_reason` | `None` | Callback `(Request, exc_info) -> str\|None` for denial categorization |
+| `denied_status_codes` | `frozenset({401, 403})` | Status codes that produce DENIED outcome |
+| `target_schema_version` | `"1.1"` | Schema version for emitted events (`"1.0"` or `"1.1"`) |
 
 ## PHI-safe defaults
 
@@ -255,8 +319,9 @@ pip install bh-fastapi-audit
 
 ```bash
 pip install bh-fastapi-audit[sqlalchemy]    # Database sink
-pip install bh-fastapi-audit[jsonschema]    # Full JSON schema validation
 ```
+
+> **Note:** `jsonschema` is a required dependency as of v0.4.0 (runtime validation support).
 
 ### Development installation
 

@@ -12,6 +12,7 @@ def test_public_api_imports():
         AuditConfig,
         AuditMiddleware,
         AuditSink,
+        AuditValidationError,
         EmitQueue,
         JsonlFileSink,
         LoggingSink,
@@ -19,11 +20,13 @@ def test_public_api_imports():
         contains_phi_tokens,
         redact_tokens,
         sanitize_error_message,
+        validate_event,
     )
 
     assert AuditMiddleware is not None
     assert AuditConfig is not None
     assert AuditSink is not None
+    assert AuditValidationError is not None
     assert MemorySink is not None
     assert JsonlFileSink is not None
     assert LoggingSink is not None
@@ -31,6 +34,7 @@ def test_public_api_imports():
     assert callable(sanitize_error_message)
     assert callable(contains_phi_tokens)
     assert callable(redact_tokens)
+    assert callable(validate_event)
 
 
 def test_typed_event_blocks_importable():
@@ -82,7 +86,7 @@ def test_version_exposed():
     from bh_fastapi_audit import __version__
 
     assert isinstance(__version__, str)
-    assert __version__ == "0.3.0"
+    assert __version__ == "0.4.0"
 
 
 def test_all_exports_defined():
@@ -94,6 +98,7 @@ def test_all_exports_defined():
         "AuditConfig",
         "AuditMiddleware",
         "AuditStats",
+        "AuditValidationError",
         "EmitQueue",
         # Types
         "ActionBlock",
@@ -114,6 +119,8 @@ def test_all_exports_defined():
         "LoggingSink",
         "MemorySink",
         "SQLAlchemySink",
+        # Validation
+        "validate_event",
         # Redaction
         "contains_phi_tokens",
         "redact_tokens",
