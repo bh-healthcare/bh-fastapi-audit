@@ -32,6 +32,7 @@ class AuditStats:
         "callback_failures_total",
         "events_dropped_total",
         "validation_failures_total",
+        "validation_time_ms_total",
     )
 
     def __init__(self) -> None:
@@ -41,13 +42,19 @@ class AuditStats:
         self.callback_failures_total: int = 0
         self.events_dropped_total: int = 0
         self.validation_failures_total: int = 0
+        self.validation_time_ms_total: float = 0.0
 
     def increment(self, name: _CounterName) -> None:
         """Atomically increment a named counter by 1."""
         with self._lock:
             setattr(self, name, getattr(self, name) + 1)
 
-    def snapshot(self) -> dict[str, int]:
+    def record_validation_time(self, ms: float) -> None:
+        """Add *ms* to the cumulative validation time counter."""
+        with self._lock:
+            self.validation_time_ms_total += ms
+
+    def snapshot(self) -> dict[str, int | float]:
         """Return a plain-dict copy of the current counter values."""
         with self._lock:
             return {
@@ -56,4 +63,5 @@ class AuditStats:
                 "callback_failures_total": self.callback_failures_total,
                 "events_dropped_total": self.events_dropped_total,
                 "validation_failures_total": self.validation_failures_total,
+                "validation_time_ms_total": self.validation_time_ms_total,
             }

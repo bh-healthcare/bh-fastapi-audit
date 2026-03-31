@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bh-healthcare.github.io/bh-audit-schema/1.1/audit_event.schema.json",
+  "title": "BH Audit Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "timestamp",
+    "service",
+    "actor",
+    "action",
+    "resource",
+    "outcome"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.1",
+      "description": "Schema version for this audit event."
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "minLength": 36,
+      "maxLength": 36,
+      "description": "Globally unique UUID identifier for this audit event."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the audited action occurred."
+    },
+
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "environment": { "type": "string", "maxLength": 64, "description": "prod|staging|dev etc." },
+        "version": { "type": "string", "maxLength": 64, "description": "Service version/build identifier." }
+      }
+    },
+
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "trace_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "session_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "description": "Identifiers used to correlate events across services. At least one ID required if present."
+    },
+
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject_id", "subject_type"],
+      "properties": {
+        "subject_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "subject_type": {
+          "type": "string",
+          "enum": ["human", "service"],
+          "description": "Whether the actor is a human user or a service principal."
+        },
+        "org_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "owner_org_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Organization that owns the resource being accessed. Enables cross-org access detection."
+        },
+        "roles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "maxItems": 25,
+          "description": "Optional roles at time of access."
+        }
+      }
+    },
+
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["READ", "CREATE", "UPDATE", "DELETE", "EXPORT", "LOGIN", "LOGOUT", "PRINT", "OTHER"]
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Optional specific action name (e.g., 'verify_insurance', 'sign_bps')."
+        },
+        "phi_touched": {
+          "type": "boolean",
+          "description": "True if the action touches regulated PHI (behavioral health context)."
+        },
+        "data_classification": {
+          "type": "string",
+          "enum": ["PHI", "PII", "NONE", "UNKNOWN"],
+          "default": "UNKNOWN"
+        }
+      }
+    },
+
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1, "maxLength": 128, "description": "E.g., Patient, Note, Encounter, Appointment, Program." },
+        "id": { "type": "string", "minLength": 1, "maxLength": 256, "description": "Resource identifier if applicable." },
+        "patient_id": { "type": "string", "minLength": 1, "maxLength": 256, "description": "Patient identifier if applicable. Recommended for PHI-touching actions." }
+      }
+    },
+
+    "http": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+        },
+        "route_template": { "type": "string", "maxLength": 512, "description": "Template path, not raw path (e.g., /patients/{patient_id}/notes/{note_id})." },
+        "status_code": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "client_ip": {
+          "type": "string",
+          "anyOf": [
+            { "format": "ipv4" },
+            { "format": "ipv6" }
+          ],
+          "description": "Client IP address (IPv4 or IPv6)."
+        },
+        "user_agent": { "type": "string", "maxLength": 512 }
+      }
+    },
+
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["SUCCESS", "FAILURE", "DENIED"] },
+        "error_type": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "error_message": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Sanitized error message. Must not contain PHI."
+        }
+      },
+      "description": "DENIED indicates the system correctly refused access (not an error). FAILURE indicates an operational error. Both FAILURE and DENIED require error_type. DENIED requires error_type to enable compliance and SOC teams to distinguish denial categories (role, cross-org, consent, etc.). error_message is optional on DENIED."
+    },
+
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event_hash": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "prev_event_hash": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "hash_alg": {
+          "type": "string",
+          "enum": ["sha256", "sha384", "sha512"],
+          "description": "Hash algorithm used for tamper-evident chaining."
+        }
+      },
+      "dependentRequired": {
+        "event_hash": ["hash_alg"],
+        "prev_event_hash": ["hash_alg", "event_hash"]
+      },
+      "description": "Optional tamper-evident chaining fields."
+    },
+
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": ["string", "integer", "number", "boolean", "null"]
+      },
+      "maxProperties": 20,
+      "description": "Optional safe metadata. Values must be scalar (no nested objects or arrays). Must not include raw PHI."
+    }
+  },
+
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": { "status": { "const": "FAILURE" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "required": ["status", "error_type", "error_message"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": { "status": { "const": "DENIED" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "outcome": {
+            "required": ["status", "error_type"]
+          }
+        }
+      }
+    }
+  ]
+}

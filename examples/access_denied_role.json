@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.1",
+  "event_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+  "timestamp": "2026-03-30T14:05:00.000Z",
+  "service": {
+    "name": "clinical-api",
+    "environment": "prod",
+    "version": "3.1.0"
+  },
+  "actor": {
+    "subject_id": "user-clinician-42",
+    "subject_type": "human",
+    "org_id": "org-main",
+    "roles": ["clinician"]
+  },
+  "action": {
+    "type": "READ",
+    "data_classification": "PHI",
+    "phi_touched": false
+  },
+  "resource": {
+    "type": "Patient",
+    "id": "patient-9999",
+    "patient_id": "patient-9999"
+  },
+  "http": {
+    "method": "GET",
+    "route_template": "/patients/{patient_id}",
+    "status_code": 403
+  },
+  "outcome": {
+    "status": "DENIED",
+    "error_type": "RoleDenied"
+  }
+}

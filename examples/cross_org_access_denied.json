@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.1",
+  "event_id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+  "timestamp": "2026-03-30T14:15:00.000Z",
+  "service": {
+    "name": "data-exchange-api",
+    "environment": "prod",
+    "version": "2.0.0"
+  },
+  "actor": {
+    "subject_id": "svc-external-partner",
+    "subject_type": "service",
+    "org_id": "org-partner-east",
+    "owner_org_id": "org-main"
+  },
+  "action": {
+    "type": "EXPORT",
+    "data_classification": "PHI",
+    "phi_touched": false
+  },
+  "resource": {
+    "type": "PatientBundle",
+    "id": "bundle-1234",
+    "patient_id": "patient-7777"
+  },
+  "http": {
+    "method": "POST",
+    "route_template": "/export/patients/{patient_id}",
+    "status_code": 403
+  },
+  "outcome": {
+    "status": "DENIED",
+    "error_type": "CrossOrgAccessDenied"
+  },
+  "correlation": {
+    "request_id": "req-export-abc",
+    "trace_id": "1af7651916cd43dd8448eb211c80319d"
+  }
+}
