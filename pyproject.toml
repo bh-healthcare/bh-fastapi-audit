@@ -47,12 +47,17 @@ dev = [
     "httpx>=0.24.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "moto[dynamodb]>=5.0,<6",      # AWS service mocking for DynamoDB tests
+    "boto3>=1.34,<2",              # Needed at test time for DynamoDB sink tests
 ]
 jsonschema = [
     "jsonschema>=4.20,<5",         # Now a core dep; this extra is a no-op but kept so existing pip install "pkg[jsonschema]" commands don't break
 ]
 sqlalchemy = [
     "sqlalchemy>=2.0.0",
+]
+dynamodb = [
+    "boto3>=1.34,<2",              # AWS SDK for DynamoDB audit sink
 ]
 
 [project.urls]
@@ -61,6 +66,7 @@ Documentation = "https://github.com/bh-healthcare/bh-fastapi-audit#readme"
 Repository = "https://github.com/bh-healthcare/bh-fastapi-audit"
 Issues = "https://github.com/bh-healthcare/bh-fastapi-audit/issues"
 Changelog = "https://github.com/bh-healthcare/bh-fastapi-audit/blob/main/CHANGELOG.md"
+Author = "https://tanmayakumar.com"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bh_fastapi_audit"]

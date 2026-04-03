@@ -15,8 +15,15 @@ try:
 except ImportError:
     SQLAlchemySink = None  # type: ignore[misc, assignment]
 
+# DynamoDB sink is optional - import will fail if boto3 not installed
+try:
+    from bh_fastapi_audit.sinks.dynamodb import DynamoDBSink
+except ImportError:
+    DynamoDBSink = None  # type: ignore[misc, assignment]
+
 __all__ = [
     "AuditSink",
+    "DynamoDBSink",
     "JsonlFileSink",
     "LoggingSink",
     "MemorySink",

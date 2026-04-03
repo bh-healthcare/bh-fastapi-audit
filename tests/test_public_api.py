@@ -81,6 +81,19 @@ def test_sqlalchemy_sink_import():
         assert SQLAlchemySink is None
 
 
+def test_dynamodb_sink_import():
+    """DynamoDBSink should be importable (may be None if boto3 not installed)."""
+    from bh_fastapi_audit import DynamoDBSink
+
+    try:
+        import boto3  # noqa: F401
+
+        assert DynamoDBSink is not None
+        assert hasattr(DynamoDBSink, "emit")
+    except ImportError:
+        assert DynamoDBSink is None
+
+
 def test_version_exposed():
     """Package version should be accessible."""
     from bh_fastapi_audit import __version__
@@ -115,6 +128,7 @@ def test_all_exports_defined():
         "ServiceBlock",
         # Sinks
         "AuditSink",
+        "DynamoDBSink",
         "JsonlFileSink",
         "LoggingSink",
         "MemorySink",
