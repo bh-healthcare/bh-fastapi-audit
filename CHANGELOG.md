@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`EmitFailureMode`** type alias exported from `bh_fastapi_audit` — `Literal["silent", "log", "raise"]`.
+- **`HashAlgorithm`** and **`IntegrityBlock`** type aliases now exported from
+  the top-level package for downstream type checking.
+- **`py.typed`** marker file — PEP 561 typed package compliance.
 - **`DynamoDBSink`** — production-grade audit sink for AWS DynamoDB (`pip install
   bh-fastapi-audit[dynamodb]`).  Single-table design with `service#date` partition
   key and `timestamp#event_id` sort key, optimized for time-range queries per service.
@@ -33,6 +37,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`docs/deploying-dynamodb.md`** — deployment guide covering Terraform provisioning,
   IAM policy setup, environment variable configuration, table design reference,
   failure handling, and cost estimates for production DynamoDB deployments.
+- **Chain hashing** — tamper-evident integrity for audit events:
+  - `canonical_serialize()` — deterministic JSON serialization excluding the
+    `integrity` block, producing stable bytes for hashing.
+  - `compute_chain_hash()` — computes an `integrity` dict (`event_hash`,
+    `prev_event_hash`, `hash_alg`) linking each event to its predecessor.
+    Supports `sha256` (default), `sha384`, and `sha512`.
+  - `ChainState` — thread-safe in-memory chain state for single-process
+    deployments.  `advance(hash) -> prev_hash`.
+  - `DynamoDBChainState` — multi-process chain state backed by DynamoDB
+    conditional writes with automatic retry (up to 3 attempts).  Falls back
+    to unchained emission on exhausted retries.
+  - `LedgerSink` — JSONL file sink with built-in chain hashing.  Each line
+    includes an `integrity` block.  Drop-in replacement for `JsonlFileSink`
+    when tamper evidence is needed without middleware-level configuration.
+- **Middleware integrity injection** — three new `AuditConfig` fields:
+  - `enable_integrity: bool = False` — opt-in chain hashing at the
+    middleware level (applies to **all** sinks automatically).
+  - `chain_state` — `ChainState`, `DynamoDBChainState`, or `None`.
+  - `hash_algorithm: str = "sha256"` — configurable hash algorithm.
+  - When enabled, `_safe_emit` injects an `integrity` block into every event
+    before it reaches any sink (MemorySink, LoggingSink, DynamoDBSink, etc.).
+- **New stats counters**: `integrity_events_total` and `chain_gaps_total` in
+  `AuditStats.snapshot()` for monitoring chain hashing health.
+- **LedgerSink double-hashing guard** — `LedgerSink.emit()` now logs a warning
+  if the event already has an `integrity` block before overwriting it with the
+  sink's own chain hash, preventing silent double-hashing when middleware
+  integrity is also enabled.
+
+### Changed
+
+- **`jsonschema` moved to optional dependency** — no longer a hard runtime
+  requirement.  Install with `pip install bh-fastapi-audit[jsonschema]` when
+  `validate_events=True` is needed.  The core package now has zero non-framework
+  dependencies beyond FastAPI/Pydantic.
+- **`AuditConfig.hash_algorithm`** typed as `Literal["sha256", "sha384", "sha512"]`
+  instead of `str`, catching invalid algorithms at construction time.
+- **`__getattr__`** on the top-level package and `sinks` subpackage now raises
+  a helpful `ImportError` with pip install instructions when accessing
+  `DynamoDBSink`, `DynamoDBChainState`, or `SQLAlchemySink` without the
+  corresponding optional dependency installed.
+- **Validation error messages** now include field path context
+  (e.g. `outcome.error_type: 'error_type' is a required property`).
 
 ## [0.4.0] - 2026-03-30
 

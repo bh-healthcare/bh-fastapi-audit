@@ -7,6 +7,8 @@ conforming to the bh-audit-schema v1.1 standard for behavioral healthcare system
 
 __version__ = "0.4.0"
 
+from bh_fastapi_audit._chain import canonical_serialize, compute_chain_hash
+from bh_fastapi_audit._chain_state import ChainState
 from bh_fastapi_audit._queue import EmitQueue
 from bh_fastapi_audit._stats import AuditStats
 from bh_fastapi_audit._types import (
@@ -17,7 +19,10 @@ from bh_fastapi_audit._types import (
     AuditEvent,
     CorrelationBlock,
     DataClassification,
+    EmitFailureMode,
+    HashAlgorithm,
     HttpBlock,
+    IntegrityBlock,
     OutcomeBlock,
     OutcomeStatus,
     ResourceBlock,
@@ -32,12 +37,41 @@ from bh_fastapi_audit.redaction import (
 )
 from bh_fastapi_audit.sinks import (
     AuditSink,
-    DynamoDBSink,
     JsonlFileSink,
+    LedgerSink,
     LoggingSink,
     MemorySink,
-    SQLAlchemySink,
 )
+
+try:
+    from bh_fastapi_audit._chain_state import DynamoDBChainState
+except ImportError:
+    pass
+
+try:
+    from bh_fastapi_audit.sinks.dynamodb import DynamoDBSink
+except ImportError:
+    pass
+
+try:
+    from bh_fastapi_audit.sinks.sqlalchemy import SQLAlchemySink
+except ImportError:
+    pass
+
+_OPTIONAL_DEP_HINTS: dict[str, str] = {
+    "DynamoDBSink": "pip install bh-fastapi-audit[dynamodb]",
+    "DynamoDBChainState": "pip install bh-fastapi-audit[dynamodb]",
+    "SQLAlchemySink": "pip install bh-fastapi-audit[sqlalchemy]",
+}
+
+
+def __getattr__(name: str) -> object:
+    if name in _OPTIONAL_DEP_HINTS:
+        raise ImportError(
+            f"{name} requires an optional dependency. Install with: {_OPTIONAL_DEP_HINTS[name]}"
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "__version__",
@@ -46,6 +80,11 @@ __all__ = [
     "AuditStats",
     "AuditValidationError",
     "EmitQueue",
+    # Chain hashing
+    "canonical_serialize",
+    "compute_chain_hash",
+    "ChainState",
+    "DynamoDBChainState",
     # Type definitions
     "ActionBlock",
     "ActionType",
@@ -54,7 +93,10 @@ __all__ = [
     "AuditEvent",
     "CorrelationBlock",
     "DataClassification",
+    "EmitFailureMode",
+    "HashAlgorithm",
     "HttpBlock",
+    "IntegrityBlock",
     "OutcomeBlock",
     "OutcomeStatus",
     "ResourceBlock",
@@ -63,6 +105,7 @@ __all__ = [
     "AuditSink",
     "DynamoDBSink",
     "JsonlFileSink",
+    "LedgerSink",
     "LoggingSink",
     "MemorySink",
     "SQLAlchemySink",
