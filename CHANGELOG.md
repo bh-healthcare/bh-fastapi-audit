@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`[dynamodb]` optional extra** — `pip install bh-fastapi-audit[dynamodb]` installs
   `boto3>=1.34,<2`.
 - **`moto[dynamodb]`** added to `[dev]` extras for DynamoDB test mocking.
+- **`docs/deploying-dynamodb.md`** — deployment guide covering Terraform provisioning,
+  IAM policy setup, environment variable configuration, table design reference,
+  failure handling, and cost estimates for production DynamoDB deployments.
 
 ## [0.4.0] - 2026-03-30
 
