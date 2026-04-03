@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`DynamoDBSink`** — production-grade audit sink for AWS DynamoDB (`pip install
+  bh-fastapi-audit[dynamodb]`).  Single-table design with `service#date` partition
+  key and `timestamp#event_id` sort key, optimized for time-range queries per service.
+  - Three Global Secondary Indexes for compliance queries:
+    - `patient_id-index` — all access to a given patient (HIPAA §164.312(b))
+    - `actor-index` — all actions by a given user (HIPAA §164.308(a)(1)(ii)(D))
+    - `outcome-index` — all DENIED/FAILED outcomes (HIPAA §164.308(a)(5)(ii)(C))
+  - `query_by_patient()`, `query_by_actor()`, `query_denials()` convenience methods
+    with optional time-range filtering.
+  - TTL-based retention (default 2190 days ≈ 6 years for HIPAA), disable with
+    `ttl_days=None`.
+  - Conditional PutItem on `event_id` prevents duplicate writes (idempotent).
+  - Full event stored as compact JSON in `event_json` attribute for archival/replay.
+  - Key fields (actor, action, resource, outcome, HTTP) flattened to top-level
+    DynamoDB attributes for GSI projections.
+  - `create_table=True` convenience flag for dev/test (creates table + GSIs).
+  - `boto3` is an **optional dependency** — guarded import, same pattern as
+    `SQLAlchemySink`.
+- **`[dynamodb]` optional extra** — `pip install bh-fastapi-audit[dynamodb]` installs
+  `boto3>=1.34,<2`.
+- **`moto[dynamodb]`** added to `[dev]` extras for DynamoDB test mocking.
+
 ## [0.4.0] - 2026-03-30
 
 ### Added

@@ -32,6 +32,7 @@ from bh_fastapi_audit.redaction import (
 )
 from bh_fastapi_audit.sinks import (
     AuditSink,
+    DynamoDBSink,
     JsonlFileSink,
     LoggingSink,
     MemorySink,
@@ -60,6 +61,7 @@ __all__ = [
     "ServiceBlock",
     # Sinks
     "AuditSink",
+    "DynamoDBSink",
     "JsonlFileSink",
     "LoggingSink",
     "MemorySink",
