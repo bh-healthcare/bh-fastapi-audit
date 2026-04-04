@@ -10,6 +10,7 @@ the previous event's hash.
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ class LedgerSink:
         self._jsonl = JsonlFileSink(path, flush=flush)
         self._chain = ChainState()
         self._algorithm = algorithm
+        self._lock = threading.Lock()
 
     def emit(self, event: dict[str, Any]) -> None:
         """Hash, chain, and write *event* as a single JSONL line."""
@@ -50,10 +52,11 @@ class LedgerSink:
                 "LedgerSink: event already has integrity block (possible double-hashing); "
                 "overwriting with LedgerSink's own chain hash"
             )
-        integrity = compute_chain_hash(event, self._chain.last_hash, self._algorithm)
-        event["integrity"] = integrity
-        self._chain.advance(integrity["event_hash"])
-        self._jsonl.emit(event)
+        with self._lock:
+            integrity = compute_chain_hash(event, self._chain.last_hash, self._algorithm)
+            event = {**event, "integrity": integrity}
+            self._chain.advance(integrity["event_hash"])
+            self._jsonl.emit(event)
 
     def close(self) -> None:
         """Close the underlying file."""

@@ -121,46 +121,86 @@ class DynamoDBSink:
         elif end:
             key_cond &= Key("timestamp").lte(end)
 
-        resp = self._table.query(
+        return self._paginated_query(
             IndexName="patient_id-index",
             KeyConditionExpression=key_cond,
         )
-        return resp.get("Items", [])
 
     def query_by_actor(
         self,
         actor_id: str,
         start: str | None = None,
+        end: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Query GSI2 (actor-index) for user activity audit."""
+        """Query GSI2 (actor-index) for user activity audit.
+
+        Returns parsed audit events ordered by timestamp.
+        """
         from boto3.dynamodb.conditions import Key
 
         key_cond = Key("actor_subject_id").eq(actor_id)
-        if start:
+        if start and end:
+            key_cond &= Key("timestamp").between(start, end)
+        elif start:
             key_cond &= Key("timestamp").gte(start)
+        elif end:
+            key_cond &= Key("timestamp").lte(end)
 
-        resp = self._table.query(
+        return self._paginated_query(
             IndexName="actor-index",
             KeyConditionExpression=key_cond,
         )
-        return resp.get("Items", [])
 
     def query_denials(
         self,
         start: str | None = None,
+        end: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Query GSI3 (outcome-index) for all DENIED outcomes."""
+        """Query GSI3 (outcome-index) for all DENIED outcomes.
+
+        Returns parsed audit events ordered by timestamp.
+        """
         from boto3.dynamodb.conditions import Key
 
         key_cond = Key("outcome_status").eq("DENIED")
-        if start:
+        if start and end:
+            key_cond &= Key("timestamp").between(start, end)
+        elif start:
             key_cond &= Key("timestamp").gte(start)
+        elif end:
+            key_cond &= Key("timestamp").lte(end)
 
-        resp = self._table.query(
+        return self._paginated_query(
             IndexName="outcome-index",
             KeyConditionExpression=key_cond,
         )
-        return resp.get("Items", [])
+
+    # ------------------------------------------------------------------
+    # Pagination / parsing helpers
+    # ------------------------------------------------------------------
+
+    def _paginated_query(self, **kwargs: Any) -> list[dict[str, Any]]:
+        """Execute a DynamoDB query, following all pagination tokens."""
+        items: list[dict[str, Any]] = []
+        while True:
+            resp = self._table.query(**kwargs)
+            items.extend(resp.get("Items", []))
+            if "LastEvaluatedKey" not in resp:
+                break
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        return self._parse_items(items)
+
+    @staticmethod
+    def _parse_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Parse ``event_json`` from DynamoDB items back into event dicts."""
+        results: list[dict[str, Any]] = []
+        for item in items:
+            raw = item.get("event_json")
+            if raw:
+                results.append(json.loads(raw))
+            else:
+                results.append(item)
+        return results
 
     # ------------------------------------------------------------------
     # Table creation (dev / test only)
@@ -199,11 +239,8 @@ class DynamoDBSink:
                                 "outcome_status",
                                 "data_classification",
                                 "http_route_template",
+                                "event_json",
                             ],
-                        },
-                        "ProvisionedThroughput": {
-                            "ReadCapacityUnits": 5,
-                            "WriteCapacityUnits": 5,
                         },
                     },
                     {
@@ -221,11 +258,8 @@ class DynamoDBSink:
                                 "patient_id",
                                 "outcome_status",
                                 "http_route_template",
+                                "event_json",
                             ],
-                        },
-                        "ProvisionedThroughput": {
-                            "ReadCapacityUnits": 5,
-                            "WriteCapacityUnits": 5,
                         },
                     },
                     {
@@ -243,19 +277,12 @@ class DynamoDBSink:
                                 "resource_type",
                                 "patient_id",
                                 "error_type",
+                                "event_json",
                             ],
-                        },
-                        "ProvisionedThroughput": {
-                            "ReadCapacityUnits": 5,
-                            "WriteCapacityUnits": 5,
                         },
                     },
                 ],
-                BillingMode="PROVISIONED",
-                ProvisionedThroughput={
-                    "ReadCapacityUnits": 5,
-                    "WriteCapacityUnits": 5,
-                },
+                BillingMode="PAY_PER_REQUEST",
             )
             self._table.wait_until_exists()
         except ClientError as exc:

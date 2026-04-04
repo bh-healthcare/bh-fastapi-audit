@@ -129,7 +129,7 @@ def test_version_exposed():
     from bh_fastapi_audit import __version__
 
     assert isinstance(__version__, str)
-    assert __version__ == "0.5.0"
+    assert __version__ == "1.0.0"
 
 
 def test_all_exports_defined():

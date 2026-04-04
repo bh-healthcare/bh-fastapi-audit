@@ -15,9 +15,9 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.5.0** — Verifier CLI, opt-in telemetry, chain hashing, DynamoDB sink, runtime validation, DENIED outcome with denial callbacks, schema negotiation.
+**Current version: v1.0.0** — Verifier CLI, opt-in telemetry, chain hashing, DynamoDB sink, runtime validation, DENIED outcome with denial callbacks, schema negotiation.
 
-### v0.5 (current)
+### v1.0 (current)
 - **Verifier CLI** — `bh-audit verify` for chain integrity verification (file or DynamoDB source, human or JSON output)
 - **Programmatic verifier** — `verify_chain()`, `VerifyResult`, `VerifyFailure` for code-level chain verification
 - **Opt-in telemetry** — privacy-first, counter-based weekly aggregate reports (no PII/PHI)
@@ -303,6 +303,12 @@ See [docs/migrating-1.0-to-1.1.md](docs/migrating-1.0-to-1.1.md) for a full migr
 | `get_denial_reason` | `None` | Callback `(Request, exc_info) -> str\|None` for denial categorization |
 | `denied_status_codes` | `frozenset({401, 403})` | Status codes that produce DENIED outcome |
 | `target_schema_version` | `"1.1"` | Schema version for emitted events (`"1.0"` or `"1.1"`) |
+| `enable_integrity` | `False` | Enable chain hashing on emitted events |
+| `chain_state` | `None` | Chain state backend (`ChainState` or `DynamoDBChainState`) |
+| `hash_algorithm` | `"sha256"` | Hash algorithm for chain hashing (`"sha256"`, `"sha384"`, `"sha512"`) |
+| `telemetry_enabled` | `False` | Enable opt-in anonymous telemetry |
+| `telemetry_endpoint` | `"https://…/v1/report"` | Telemetry receiver URL |
+| `telemetry_deployment_id_path` | `"/tmp/bh-audit/"` | Directory for anonymous deployment ID file |
 
 ## PHI-safe defaults
 
@@ -317,7 +323,7 @@ PHI safety is enforced by tests that assert synthetic PHI tokens never appear in
 
 ## Chain hashing (integrity)
 
-v0.5 adds tamper-evident audit trails via SHA-256 chain hashing:
+v1.0 adds tamper-evident audit trails via SHA-256 chain hashing:
 
 ```python
 from bh_fastapi_audit import ChainState
@@ -345,7 +351,7 @@ config = AuditConfig(
 
 ## Verifier CLI
 
-v0.5 adds `bh-audit verify` for chain integrity verification:
+v1.0 adds `bh-audit verify` for chain integrity verification:
 
 ```bash
 pip install bh-fastapi-audit[cli]
@@ -371,7 +377,7 @@ assert result.result == "PASS"
 
 ## Telemetry
 
-v0.5 adds opt-in, privacy-first telemetry. **Off by default.** No PII, no PHI, no event content -- only aggregate counters.
+v1.0 adds opt-in, privacy-first telemetry. **Off by default.** No PII, no PHI, no event content -- only aggregate counters.
 
 ```python
 config = AuditConfig(

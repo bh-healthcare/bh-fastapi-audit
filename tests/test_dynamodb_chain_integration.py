@@ -393,8 +393,8 @@ class TestEdgeCases:
         assert results[0]["event_id"] == "gsi-test-001"
         # chain_hash is NOT in the GSI projection — verify that the
         # projected attributes are correct for chained events
-        assert results[0]["outcome_status"] == "SUCCESS"
-        assert results[0]["actor_subject_id"] == "user-1"
+        assert results[0]["outcome"]["status"] == "SUCCESS"
+        assert results[0]["actor"]["subject_id"] == "user-1"
 
     def test_full_table_scan_includes_chain_hash(self, infra):
         """A table scan (not GSI) should include chain_hash."""

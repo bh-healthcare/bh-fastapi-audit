@@ -94,7 +94,7 @@ class AuditConfig:
     chain_state: Any = None
     hash_algorithm: HashAlgorithm = "sha256"
 
-    # Telemetry (v0.5) -- off by default, opt-in only
+    # Telemetry (v1.0) -- off by default, opt-in only
     telemetry_enabled: bool = False
     telemetry_endpoint: str = "https://abt0rxi196.execute-api.us-east-1.amazonaws.com/v1/report"
     telemetry_deployment_id_path: str = "/tmp/bh-audit/"
@@ -132,16 +132,6 @@ class AuditMiddleware:
         self.config = config
         self._stats = AuditStats()
         self._failure_log = logging.getLogger(config.failure_logger_name)
-        self._queue: EmitQueue | None = None
-        if config.emit_mode == "queue":
-            self._queue = EmitQueue(
-                sink,
-                self._stats,
-                maxsize=config.queue_size,
-                emit_failure_mode=config.emit_failure_mode,
-                failure_logger=self._failure_log,
-            )
-
         if config.telemetry_enabled:
             from bh_fastapi_audit import __version__
             from bh_fastapi_audit._telemetry import TelemetryEmitter
@@ -155,6 +145,17 @@ class AuditMiddleware:
             )
         else:
             self._telemetry = None
+
+        self._queue: EmitQueue | None = None
+        if config.emit_mode == "queue":
+            self._queue = EmitQueue(
+                sink,
+                self._stats,
+                maxsize=config.queue_size,
+                emit_failure_mode=config.emit_failure_mode,
+                failure_logger=self._failure_log,
+                telemetry=self._telemetry,
+            )
 
     @property
     def stats(self) -> AuditStats:
@@ -277,14 +278,14 @@ class AuditMiddleware:
                 self._stats.increment("integrity_events_total")
             except Exception:
                 self._stats.increment("chain_gaps_total")
+                if self._telemetry is not None:
+                    try:
+                        self._telemetry.record_chain_gap()
+                    except Exception:
+                        pass
 
         if self._queue is not None:
             self._queue.enqueue(event)
-            if self._telemetry is not None:
-                try:
-                    self._telemetry.record(event)
-                except Exception:
-                    pass
             return
 
         try:

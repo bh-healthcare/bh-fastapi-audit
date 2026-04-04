@@ -83,14 +83,14 @@ class TestTelemetryCounters:
     def test_to_report_structure(self) -> None:
         c = TelemetryCounters()
         c.increment(_make_event())
-        report = c.to_report("deploy-id", "svc", "staging", "0.5.0")
+        report = c.to_report("deploy-id", "svc", "staging", "1.0.0")
 
         assert report["schema_version"] == "1.0"
         assert report["deployment_id"] == "deploy-id"
         assert report["service_name"] == "svc"
         assert report["environment"] == "staging"
         assert report["package"] == "bh-fastapi-audit"
-        assert report["package_version"] == "0.5.0"
+        assert report["package_version"] == "1.0.0"
         assert "counters" in report
         counters = report["counters"]
         assert counters["events_emitted"] == 1
@@ -99,7 +99,7 @@ class TestTelemetryCounters:
     def test_to_report_no_pii(self) -> None:
         c = TelemetryCounters()
         c.increment(_make_event())
-        report = c.to_report("id", "svc", "prod", "0.5.0")
+        report = c.to_report("id", "svc", "prod", "1.0.0")
         serialized = json.dumps(report)
         for keyword in ["patient", "user-1", "ssn", "email", "phone"]:
             assert keyword not in serialized.lower()
@@ -147,7 +147,7 @@ class TestTelemetryEmitter:
                 deployment_id_path=tmpdir,
                 service_name="test-svc",
                 environment="test",
-                package_version="0.5.0",
+                package_version="1.0.0",
             )
             with patch("bh_fastapi_audit._telemetry.urlopen") as mock_urlopen:
                 emitter.record(_make_event())
@@ -161,7 +161,7 @@ class TestTelemetryEmitter:
                 deployment_id_path=tmpdir,
                 service_name="test-svc",
                 environment="test",
-                package_version="0.5.0",
+                package_version="1.0.0",
             )
             emitter._period_end = datetime.now(UTC) - timedelta(seconds=1)
 
@@ -176,7 +176,7 @@ class TestTelemetryEmitter:
                 deployment_id_path=tmpdir,
                 service_name="test-svc",
                 environment="test",
-                package_version="0.5.0",
+                package_version="1.0.0",
             )
             emitter._period_end = datetime.now(UTC) - timedelta(seconds=1)
 
@@ -192,7 +192,7 @@ class TestTelemetryEmitter:
                 deployment_id_path=tmpdir,
                 service_name="test-svc",
                 environment="test",
-                package_version="0.5.0",
+                package_version="1.0.0",
             )
             id1 = emitter._get_or_create_deployment_id()
             id2 = emitter._get_or_create_deployment_id()
@@ -204,7 +204,7 @@ class TestTelemetryEmitter:
                 deployment_id_path=tmpdir,
                 service_name="test-svc",
                 environment="test",
-                package_version="0.5.0",
+                package_version="1.0.0",
             )
             assert emitter2._get_or_create_deployment_id() == id1
 

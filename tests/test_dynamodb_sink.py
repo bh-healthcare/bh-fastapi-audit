@@ -158,7 +158,7 @@ class TestQueryByPatient:
 
         results = sink.query_by_patient("pat_100")
         assert len(results) == 2
-        assert all(r["patient_id"] == "pat_100" for r in results)
+        assert all(r["resource"]["patient_id"] == "pat_100" for r in results)
 
     def test_returns_empty_for_unknown_patient(self, sink):
         sink.emit(_make_event(resource={"type": "Patient", "patient_id": "pat_100"}))
@@ -236,7 +236,7 @@ class TestQueryDenials:
 
         results = sink.query_denials()
         assert len(results) == 2
-        assert all(r["outcome_status"] == "DENIED" for r in results)
+        assert all(r["outcome"]["status"] == "DENIED" for r in results)
 
     def test_filters_by_start(self, sink):
         sink.emit(

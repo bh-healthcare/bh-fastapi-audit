@@ -122,8 +122,6 @@ class TelemetryCounters:
 def _next_sunday(dt: datetime) -> datetime:
     """Return the start of the next Sunday (UTC midnight) after *dt*."""
     days_until_sunday = (6 - dt.weekday()) % 7
-    if days_until_sunday == 0 and dt.hour == 0 and dt.minute == 0:
-        days_until_sunday = 7
     target = dt.date() + timedelta(days=days_until_sunday or 7)
     return datetime(target.year, target.month, target.day, tzinfo=UTC)
 
@@ -151,7 +149,9 @@ class TelemetryEmitter:
         self._package_version = package_version
         self._counters = TelemetryCounters()
         self._deployment_id: str | None = None
-        self._period_end = _next_sunday(datetime.now(UTC))
+        now = datetime.now(UTC)
+        self._period_start = now
+        self._period_end = _next_sunday(now)
 
     @property
     def counters(self) -> TelemetryCounters:
@@ -182,9 +182,7 @@ class TelemetryEmitter:
                 environment=self._environment,
                 package_version=self._package_version,
             )
-            report["period_start"] = (
-                self._period_end - timedelta(days=_DEFAULT_PERIOD_DAYS)
-            ).isoformat()
+            report["period_start"] = self._period_start.isoformat()
             report["period_end"] = self._period_end.isoformat()
 
             body = json.dumps(report).encode("utf-8")
@@ -196,6 +194,7 @@ class TelemetryEmitter:
             )
             urlopen(req, timeout=_HTTP_TIMEOUT_S)  # noqa: S310
             self._counters.reset()
+            self._period_start = now
         except Exception:
             _log.debug("Telemetry emission failed (silently swallowed)", exc_info=True)
         finally:

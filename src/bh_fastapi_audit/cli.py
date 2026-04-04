@@ -22,6 +22,7 @@ except ImportError as _exc:
         "The bh-audit CLI requires typer. Install with: pip install bh-fastapi-audit[cli]"
     ) from _exc
 
+from bh_fastapi_audit import __version__
 from bh_fastapi_audit._verifier import VerifyResult, verify_chain
 
 app = typer.Typer(name="bh-audit", help="BH Audit infrastructure tools")
@@ -49,12 +50,12 @@ def _load_events_from_file(path: str) -> list[dict[str, Any]]:
 
 def _load_events_from_dynamodb(
     table: str,
-    service: str | None,
+    service: str,
     start: str | None,
     end: str | None,
     region: str | None,
 ) -> list[dict[str, Any]]:
-    """Query audit events from a DynamoDB table."""
+    """Query audit events from a DynamoDB table via the actor-index GSI."""
     try:
         from bh_fastapi_audit.sinks.dynamodb import DynamoDBSink
     except ImportError as exc:
@@ -70,15 +71,13 @@ def _load_events_from_dynamodb(
         kwargs["region"] = region
     sink = DynamoDBSink(**kwargs)
 
-    if service:
-        return sink.query_by_actor(service, start=start, end=end)
-    return sink.query_by_patient("*", start=start, end=end)
+    return sink.query_by_actor(service, start=start, end=end)
 
 
 def _format_human(result: VerifyResult, source_label: str) -> str:
     """Render a human-readable verification report."""
     lines = [
-        "bh-audit verify",
+        f"bh-audit verify v{__version__}",
         "",
         f"Source: {source_label}",
         f"Events scanned: {result.events_scanned:,}",
@@ -126,6 +125,7 @@ def _format_human(result: VerifyResult, source_label: str) -> str:
 def _format_json(result: VerifyResult, source_label: str) -> str:
     """Render a machine-readable JSON verification report."""
     payload: dict[str, Any] = {
+        "version": __version__,
         "source": source_label,
         "events_scanned": result.events_scanned,
         "time_range": {
@@ -158,7 +158,10 @@ def verify(
     source: str = typer.Option(..., help="Source type: 'file' or 'dynamodb'"),
     path: str | None = typer.Option(None, help="Path to JSONL file (for --source file)"),
     table: str | None = typer.Option(None, help="DynamoDB table name (for --source dynamodb)"),
-    service: str | None = typer.Option(None, help="Service name filter (for --source dynamodb)"),
+    service: str | None = typer.Option(
+        None,
+        help="Service / actor name to query (for --source dynamodb)",
+    ),
     start: str | None = typer.Option(None, help="Start date (ISO 8601)"),
     end: str | None = typer.Option(None, help="End date (ISO 8601)"),
     region: str | None = typer.Option(None, help="AWS region (for --source dynamodb)"),
@@ -171,13 +174,16 @@ def verify(
             raise typer.Exit(code=_EXIT_ERROR)
         try:
             events = _load_events_from_file(path)
-        except FileNotFoundError as exc:
-            typer.echo(f"Error: file not found: {path}", err=True)
+        except OSError as exc:
+            typer.echo(f"Error: cannot read file: {path} ({exc})", err=True)
             raise typer.Exit(code=_EXIT_ERROR) from exc
         source_label = path
     elif source == "dynamodb":
         if not table:
             typer.echo("Error: --table is required when --source is 'dynamodb'", err=True)
+            raise typer.Exit(code=_EXIT_ERROR)
+        if not service:
+            typer.echo("Error: --service is required when --source is 'dynamodb'", err=True)
             raise typer.Exit(code=_EXIT_ERROR)
         events = _load_events_from_dynamodb(table, service, start, end, region)
         source_label = f"dynamodb://{table}"

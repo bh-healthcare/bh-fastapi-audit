@@ -6,26 +6,36 @@ Recommended storage layouts and query patterns for bh-fastapi-audit sinks.
 
 ### Primary table: `bh_audit_events`
 
-| Attribute       | Type   | Role              |
-|-----------------|--------|-------------------|
-| `pk`            | String | Partition key     |
-| `sk`            | String | Sort key          |
-| `event_id`      | String | Unique event UUID |
-| `event_json`    | String | Serialised event  |
-| `actor_id`      | String | GSI partition key  |
-| `ttl`           | Number | TTL epoch (optional) |
+| Attribute          | Type   | Role                       |
+|--------------------|--------|----------------------------|
+| `service_date`     | String | Partition key (`<service>#<date>`) |
+| `ts_event`         | String | Sort key (`<ISO timestamp>#<event_id>`) |
+| `event_id`         | String | Unique event UUID          |
+| `timestamp`        | String | ISO 8601 UTC               |
+| `service_name`     | String | e.g. `"intake-api"`        |
+| `actor_subject_id` | String | Who performed the action   |
+| `patient_id`       | String | Nullable, for GSI1         |
+| `outcome_status`   | String | SUCCESS / FAILURE / DENIED |
+| `event_json`       | String | Full event as compact JSON |
+| `chain_hash`       | String | SHA-256 of this event      |
+| `prev_chain_hash`  | String | SHA-256 of previous event  |
+| `ttl`              | Number | TTL epoch (optional)       |
 
-**PK/SK rationale**: `pk = SERVICE#<service_name>`, `sk = <ISO timestamp>#<event_id>`.
-This gives per-service partitioning with time-ordered sort keys for efficient range queries.
+**PK/SK rationale**: `service_date = <service_name>#<YYYY-MM-DD>`,
+`ts_event = <ISO timestamp>#<event_id>`. This gives per-service daily
+partitioning with time-ordered sort keys for efficient range queries.
 
 ### Global Secondary Indexes
 
-| GSI Name         | PK           | SK              | Projection |
-|------------------|--------------|-----------------|------------|
-| `actor-index`    | `actor_id`   | `sk` (timestamp)| ALL        |
+| GSI Name           | PK                 | SK          | Projection | Use case |
+|--------------------|--------------------|-------------|------------|----------|
+| `patient_id-index` | `patient_id`       | `timestamp` | INCLUDE    | All access to patient X (HIPAA §164.312(b)) |
+| `actor-index`      | `actor_subject_id` | `timestamp` | INCLUDE    | All actions by user Y (§164.308(a)(1)(ii)(D)) |
+| `outcome-index`    | `outcome_status`   | `timestamp` | INCLUDE    | All DENIED / FAILED outcomes |
 
-The actor GSI enables "show me all events for user X" queries required by
-HIPAA accounting-of-disclosures.
+Each GSI projects key attributes needed for compliance queries (event_id,
+action_type, actor_subject_id, outcome_status, etc.) plus `event_json`
+on patient and actor indexes.
 
 ### Billing mode
 
@@ -37,8 +47,8 @@ is harder to size correctly and risks throttling during peak audit volume.
 
 - Average event size: ~1-2 KB (JSON)
 - Write throughput: one WCU per event (< 1 KB) or two WCUs (1-2 KB)
-- Read throughput: `bh-audit verify` performs a full table scan; consider
-  scheduling during off-peak hours
+- Read throughput: `bh-audit verify` performs a GSI query against the
+  `actor-index`; consider scheduling during off-peak hours for large result sets
 
 ## JSONL File Layout (LedgerSink)
 
@@ -124,8 +134,10 @@ event_item["ttl"] = int(time.time()) + (TTL_DAYS * 86400)
 
 | Scenario                          | Source   | Query                                    |
 |-----------------------------------|----------|------------------------------------------|
-| All events for a patient          | DynamoDB | GSI `actor-index`, PK = patient_id       |
-| Events in a time window           | DynamoDB | Query PK = service, SK between timestamps |
+| All events for a patient          | DynamoDB | GSI `patient_id-index`, PK = patient_id  |
+| All actions by a user             | DynamoDB | GSI `actor-index`, PK = actor_subject_id |
+| All DENIED outcomes               | DynamoDB | GSI `outcome-index`, PK = `"DENIED"`     |
+| Events in a time window           | DynamoDB | Query PK = `<service>#<date>`, SK between timestamps |
 | Full chain verification           | File     | `bh-audit verify --source file --path …` |
-| Full chain verification           | DynamoDB | `bh-audit verify --source dynamodb --table …` |
-| Compliance audit (accounting of disclosures) | DynamoDB | GSI query + filter on action.type = READ |
+| Full chain verification           | DynamoDB | `bh-audit verify --source dynamodb --table … --service …` |
+| Accounting of disclosures (HIPAA) | DynamoDB | GSI `patient_id-index` + filter on action_type = READ |

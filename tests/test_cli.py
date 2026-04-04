@@ -84,6 +84,7 @@ class TestCliFileSourcePass:
                 ],
             )
             assert result.exit_code == 0
+            assert "bh-audit verify v" in result.stdout
             assert "Chain length:" in result.stdout
             assert "Chain gaps:" in result.stdout
         finally:
@@ -132,6 +133,7 @@ class TestCliJsonFormat:
             assert result.exit_code == 0
             payload = json.loads(result.stdout)
             assert payload["result"] == "PASS"
+            assert "version" in payload
             assert "events_scanned" in payload
             assert "failures" in payload
             assert isinstance(payload["failures"], list)
@@ -194,6 +196,10 @@ class TestCliErrors:
 
     def test_dynamodb_missing_table_exit_2(self) -> None:
         result = runner.invoke(app, ["--source", "dynamodb"])
+        assert result.exit_code == 2
+
+    def test_dynamodb_missing_service_exit_2(self) -> None:
+        result = runner.invoke(app, ["--source", "dynamodb", "--table", "t"])
         assert result.exit_code == 2
 
     def test_invalid_json_exit_2(self) -> None:
