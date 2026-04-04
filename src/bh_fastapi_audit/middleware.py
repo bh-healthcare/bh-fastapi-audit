@@ -26,6 +26,7 @@ from bh_fastapi_audit._types import (
     ActorBlock,
     AuditEvent,
     CorrelationBlock,
+    HashAlgorithm,
     HttpBlock,
     OutcomeBlock,
     ServiceBlock,
@@ -89,6 +90,9 @@ class AuditConfig:
         default_factory=lambda: frozenset({401, 403}),
     )
     target_schema_version: Literal["1.0", "1.1"] = "1.1"
+    enable_integrity: bool = False
+    chain_state: Any = None
+    hash_algorithm: HashAlgorithm = "sha256"
 
     def __post_init__(self) -> None:
         if isinstance(self.metadata_allowlist, set):
@@ -239,6 +243,21 @@ class AuditMiddleware:
                     event.get("resource", {}).get("type"),
                     errors[0],
                 )
+
+        if self.config.enable_integrity and self.config.chain_state is not None:
+            try:
+                from bh_fastapi_audit._chain import compute_chain_hash
+
+                integrity = compute_chain_hash(
+                    event,
+                    self.config.chain_state.last_hash,
+                    self.config.hash_algorithm,
+                )
+                event["integrity"] = integrity
+                self.config.chain_state.advance(integrity["event_hash"])
+                self._stats.increment("integrity_events_total")
+            except Exception:
+                self._stats.increment("chain_gaps_total")
 
         if self._queue is not None:
             self._queue.enqueue(event)

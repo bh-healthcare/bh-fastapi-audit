@@ -5,6 +5,8 @@ This test ensures that users can import the documented public API
 and prevents accidental breaking changes to exports.
 """
 
+import pytest
+
 
 def test_public_api_imports():
     """All documented public symbols should be importable from the top-level package."""
@@ -13,10 +15,14 @@ def test_public_api_imports():
         AuditMiddleware,
         AuditSink,
         AuditValidationError,
+        ChainState,
         EmitQueue,
         JsonlFileSink,
+        LedgerSink,
         LoggingSink,
         MemorySink,
+        canonical_serialize,
+        compute_chain_hash,
         contains_phi_tokens,
         redact_tokens,
         sanitize_error_message,
@@ -29,8 +35,12 @@ def test_public_api_imports():
     assert AuditValidationError is not None
     assert MemorySink is not None
     assert JsonlFileSink is not None
+    assert LedgerSink is not None
     assert LoggingSink is not None
     assert EmitQueue is not None
+    assert ChainState is not None
+    assert callable(canonical_serialize)
+    assert callable(compute_chain_hash)
     assert callable(sanitize_error_message)
     assert callable(contains_phi_tokens)
     assert callable(redact_tokens)
@@ -47,7 +57,10 @@ def test_typed_event_blocks_importable():
         AuditEvent,
         CorrelationBlock,
         DataClassification,
+        EmitFailureMode,
+        HashAlgorithm,
         HttpBlock,
+        IntegrityBlock,
         OutcomeBlock,
         OutcomeStatus,
         ResourceBlock,
@@ -61,37 +74,48 @@ def test_typed_event_blocks_importable():
     assert AuditEvent is not None
     assert CorrelationBlock is not None
     assert DataClassification is not None
+    assert EmitFailureMode is not None
+    assert HashAlgorithm is not None
     assert HttpBlock is not None
+    assert IntegrityBlock is not None
     assert OutcomeBlock is not None
     assert OutcomeStatus is not None
     assert ResourceBlock is not None
     assert ServiceBlock is not None
 
 
-def test_sqlalchemy_sink_import():
-    """SQLAlchemySink should be importable (may be None if sqlalchemy not installed)."""
-    from bh_fastapi_audit import SQLAlchemySink
-
-    try:
-        import sqlalchemy  # noqa: F401
-
-        assert SQLAlchemySink is not None
-        assert hasattr(SQLAlchemySink, "emit")
-    except ImportError:
-        assert SQLAlchemySink is None
-
-
 def test_dynamodb_sink_import():
-    """DynamoDBSink should be importable (may be None if boto3 not installed)."""
+    """DynamoDBSink should be importable when boto3 is installed."""
     from bh_fastapi_audit import DynamoDBSink
 
-    try:
-        import boto3  # noqa: F401
+    assert DynamoDBSink is not None
+    assert hasattr(DynamoDBSink, "emit")
 
-        assert DynamoDBSink is not None
-        assert hasattr(DynamoDBSink, "emit")
-    except ImportError:
-        assert DynamoDBSink is None
+
+def test_dynamodb_chain_state_import():
+    """DynamoDBChainState should be importable when boto3 is installed."""
+    from bh_fastapi_audit import DynamoDBChainState
+
+    assert DynamoDBChainState is not None
+    assert hasattr(DynamoDBChainState, "advance")
+
+
+def test_optional_dep_getattr_raises_import_error():
+    """__getattr__ should give a helpful ImportError for missing optional deps."""
+    import bh_fastapi_audit
+
+    for name in ("DynamoDBSink", "DynamoDBChainState", "SQLAlchemySink"):
+        if not hasattr(bh_fastapi_audit, name):
+            with pytest.raises(ImportError, match="optional dependency"):
+                getattr(bh_fastapi_audit, name)
+
+
+def test_unknown_attr_raises_attribute_error():
+    """Accessing a truly nonexistent attribute should raise AttributeError."""
+    import bh_fastapi_audit
+
+    with pytest.raises(AttributeError, match="has no attribute"):
+        bh_fastapi_audit.NoSuchThing  # noqa: B018
 
 
 def test_version_exposed():
@@ -113,6 +137,11 @@ def test_all_exports_defined():
         "AuditStats",
         "AuditValidationError",
         "EmitQueue",
+        # Chain hashing
+        "canonical_serialize",
+        "compute_chain_hash",
+        "ChainState",
+        "DynamoDBChainState",
         # Types
         "ActionBlock",
         "ActionType",
@@ -121,7 +150,10 @@ def test_all_exports_defined():
         "AuditEvent",
         "CorrelationBlock",
         "DataClassification",
+        "EmitFailureMode",
+        "HashAlgorithm",
         "HttpBlock",
+        "IntegrityBlock",
         "OutcomeBlock",
         "OutcomeStatus",
         "ResourceBlock",
@@ -130,6 +162,7 @@ def test_all_exports_defined():
         "AuditSink",
         "DynamoDBSink",
         "JsonlFileSink",
+        "LedgerSink",
         "LoggingSink",
         "MemorySink",
         "SQLAlchemySink",

@@ -25,6 +25,7 @@ ActorType = Literal["human", "service"]
 DataClassification = Literal["PHI", "PII", "NONE", "UNKNOWN"]
 HttpMethod = Literal["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 HashAlgorithm = Literal["sha256", "sha384", "sha512"]
+EmitFailureMode = Literal["silent", "log", "raise"]
 
 
 class ServiceBlock(TypedDict, total=False):

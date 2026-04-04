@@ -13,6 +13,8 @@ _CounterName = Literal[
     "callback_failures_total",
     "events_dropped_total",
     "validation_failures_total",
+    "integrity_events_total",
+    "chain_gaps_total",
 ]
 
 
@@ -33,6 +35,8 @@ class AuditStats:
         "events_dropped_total",
         "validation_failures_total",
         "validation_time_ms_total",
+        "integrity_events_total",
+        "chain_gaps_total",
     )
 
     def __init__(self) -> None:
@@ -43,6 +47,8 @@ class AuditStats:
         self.events_dropped_total: int = 0
         self.validation_failures_total: int = 0
         self.validation_time_ms_total: float = 0.0
+        self.integrity_events_total: int = 0
+        self.chain_gaps_total: int = 0
 
     def increment(self, name: _CounterName) -> None:
         """Atomically increment a named counter by 1."""
@@ -64,4 +70,6 @@ class AuditStats:
                 "events_dropped_total": self.events_dropped_total,
                 "validation_failures_total": self.validation_failures_total,
                 "validation_time_ms_total": self.validation_time_ms_total,
+                "integrity_events_total": self.integrity_events_total,
+                "chain_gaps_total": self.chain_gaps_total,
             }
