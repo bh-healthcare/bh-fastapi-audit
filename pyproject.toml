@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bh-fastapi-audit"
-version = "0.4.0"
+version = "0.5.0"
 description = "FastAPI ASGI middleware for emitting PHI-safe audit events for behavioral healthcare systems"
 readme = "README.md"
 license = "Apache-2.0"
@@ -49,6 +49,7 @@ dev = [
     "moto[dynamodb]>=5.0,<6",      # AWS service mocking for DynamoDB tests
     "boto3>=1.34,<2",              # Needed at test time for DynamoDB sink tests
     "jsonschema>=4.20,<5",         # Needed at test time for validation tests
+    "typer>=0.9,<1",               # CLI tests
 ]
 jsonschema = [
     "jsonschema>=4.20,<5",         # Runtime schema validation (opt-in via validate_events=True)
@@ -59,6 +60,12 @@ sqlalchemy = [
 dynamodb = [
     "boto3>=1.34,<2",              # AWS SDK for DynamoDB audit sink
 ]
+cli = [
+    "typer>=0.9,<1",               # Verifier CLI (bh-audit verify)
+]
+
+[project.scripts]
+bh-audit = "bh_fastapi_audit.cli:app"
 
 [project.urls]
 Homepage = "https://github.com/bh-healthcare/bh-fastapi-audit"

@@ -5,10 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-04-02
 
 ### Added
 
+- **Verifier CLI** — `bh-audit verify` command for chain integrity verification.
+  Supports `--source file` (JSONL) and `--source dynamodb` (DynamoDB table query),
+  with `--format human` (default) and `--format json` (CI pipelines).
+  Exit codes: 0 = PASS, 1 = FAIL, 2 = ERROR.
+  Install with `pip install bh-fastapi-audit[cli]`.
+- **Programmatic verifier** — `verify_chain()`, `VerifyResult`, `VerifyFailure`
+  exported from top-level package for programmatic chain verification.
+- **Opt-in telemetry** — privacy-first, counter-based weekly usage reports.
+  No PII, no PHI, no event content. Off by default (`telemetry_enabled=False`).
+  See `docs/telemetry.md`.
+- **`[cli]` optional extra** — `typer>=0.9,<1` for the verifier CLI.
+- **Documentation**: `docs/telemetry.md`, `docs/threat-model.md`,
+  `docs/storage-patterns.md`.
 - **`EmitFailureMode`** type alias exported from `bh_fastapi_audit` — `Literal["silent", "log", "raise"]`.
 - **`HashAlgorithm`** and **`IntegrityBlock`** type aliases now exported from
   the top-level package for downstream type checking.
@@ -344,7 +357,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Apache 2.0 license
 - Vendored bh-audit-schema v1.0 JSON schema
 
-[Unreleased]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.4.0...HEAD
+[0.5.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.1...v0.2.2

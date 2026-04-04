@@ -15,9 +15,17 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v0.4.0** — Runtime validation, DENIED outcome with denial callbacks, schema negotiation (v1.0/v1.1), vendored dual-schema support.
+**Current version: v0.5.0** — Verifier CLI, opt-in telemetry, chain hashing, DynamoDB sink, runtime validation, DENIED outcome with denial callbacks, schema negotiation.
 
-### v0.4 (current)
+### v0.5 (current)
+- **Verifier CLI** — `bh-audit verify` for chain integrity verification (file or DynamoDB source, human or JSON output)
+- **Programmatic verifier** — `verify_chain()`, `VerifyResult`, `VerifyFailure` for code-level chain verification
+- **Opt-in telemetry** — privacy-first, counter-based weekly aggregate reports (no PII/PHI)
+- **Chain hashing** — tamper-evident audit trails via SHA-256 chain hashing with `enable_integrity=True`
+- **DynamoDB sink** — production-grade DynamoDB sink with 3 GSIs for HIPAA compliance queries
+- **LedgerSink** — JSONL file sink with built-in chain hashing
+
+### v0.4
 - **Runtime event validation** — optional `validate_events=True` checks every event against the vendored JSON schema before emission, with configurable failure modes (`drop`, `log_and_emit`, `raise`)
 - **DENIED outcome with denial callback** — `get_denial_reason` callback provides rich denial categories (e.g. `RoleDenied`, `ConsentRequired`, `CrossOrgAccessDenied`) for compliance queries
 - **Configurable denied status codes** — `denied_status_codes` config (default `{401, 403}`)
@@ -307,21 +315,84 @@ This library is designed to be safe by default:
 
 PHI safety is enforced by tests that assert synthetic PHI tokens never appear in emitted events.
 
+## Chain hashing (integrity)
+
+v0.5 adds tamper-evident audit trails via SHA-256 chain hashing:
+
+```python
+from bh_fastapi_audit import ChainState
+
+config = AuditConfig(
+    service_name="my-api",
+    enable_integrity=True,
+    chain_state=ChainState(),
+    hash_algorithm="sha256",
+)
+```
+
+For DynamoDB-backed multi-process chain state:
+
+```python
+from bh_fastapi_audit import DynamoDBChainState
+
+chain_state = DynamoDBChainState(table_name="bh_chain_state", service_name="my-api")
+config = AuditConfig(
+    service_name="my-api",
+    enable_integrity=True,
+    chain_state=chain_state,
+)
+```
+
+## Verifier CLI
+
+v0.5 adds `bh-audit verify` for chain integrity verification:
+
+```bash
+pip install bh-fastapi-audit[cli]
+
+# Verify a JSONL ledger file
+bh-audit verify --source file --path /var/log/audit/events.jsonl
+
+# Verify from DynamoDB
+bh-audit verify --source dynamodb --table bh_audit_events --service my-api
+
+# JSON output for CI pipelines
+bh-audit verify --source file --path events.jsonl --format json
+```
+
+Programmatic verification:
+
+```python
+from bh_fastapi_audit import verify_chain
+
+result = verify_chain(events)
+assert result.result == "PASS"
+```
+
+## Telemetry
+
+v0.5 adds opt-in, privacy-first telemetry. **Off by default.** No PII, no PHI, no event content -- only aggregate counters.
+
+```python
+config = AuditConfig(
+    service_name="my-api",
+    telemetry_enabled=True,  # explicit opt-in required
+)
+```
+
+See [docs/telemetry.md](docs/telemetry.md) for the full privacy commitment and payload format.
+
 ## Installation
 
 **Requires Python 3.11+**
 
 ```bash
-pip install bh-fastapi-audit
+pip install bh-fastapi-audit                # core (FastAPI + Pydantic)
+pip install bh-fastapi-audit[dynamodb]      # + DynamoDB sink (boto3)
+pip install bh-fastapi-audit[cli]           # + bh-audit verify CLI (typer)
+pip install bh-fastapi-audit[sqlalchemy]    # + SQLAlchemy sink
+pip install bh-fastapi-audit[jsonschema]    # + runtime schema validation
 ```
-
-### Optional dependencies
-
-```bash
-pip install bh-fastapi-audit[sqlalchemy]    # Database sink
-```
-
-> **Note:** `jsonschema` is a required dependency as of v0.4.0 (runtime validation support).
 
 ### Development installation
 
