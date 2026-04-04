@@ -5,7 +5,7 @@ This package provides pure ASGI middleware for emitting structured audit events
 conforming to the bh-audit-schema v1.1 standard for behavioral healthcare systems.
 """
 
-__version__ = "0.4.0"
+__version__ = "1.0.0"
 
 from bh_fastapi_audit._chain import canonical_serialize, compute_chain_hash
 from bh_fastapi_audit._chain_state import ChainState
@@ -29,6 +29,7 @@ from bh_fastapi_audit._types import (
     ServiceBlock,
 )
 from bh_fastapi_audit._validation import AuditValidationError, validate_event
+from bh_fastapi_audit._verifier import VerifyFailure, VerifyResult, verify_chain
 from bh_fastapi_audit.middleware import AuditConfig, AuditMiddleware
 from bh_fastapi_audit.redaction import (
     contains_phi_tokens,
@@ -109,6 +110,10 @@ __all__ = [
     "LoggingSink",
     "MemorySink",
     "SQLAlchemySink",
+    # Verifier
+    "VerifyFailure",
+    "VerifyResult",
+    "verify_chain",
     # Validation
     "validate_event",
     # Redaction utilities

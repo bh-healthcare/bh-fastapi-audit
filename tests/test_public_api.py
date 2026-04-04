@@ -21,12 +21,15 @@ def test_public_api_imports():
         LedgerSink,
         LoggingSink,
         MemorySink,
+        VerifyFailure,
+        VerifyResult,
         canonical_serialize,
         compute_chain_hash,
         contains_phi_tokens,
         redact_tokens,
         sanitize_error_message,
         validate_event,
+        verify_chain,
     )
 
     assert AuditMiddleware is not None
@@ -45,6 +48,9 @@ def test_public_api_imports():
     assert callable(contains_phi_tokens)
     assert callable(redact_tokens)
     assert callable(validate_event)
+    assert callable(verify_chain)
+    assert VerifyResult is not None
+    assert VerifyFailure is not None
 
 
 def test_typed_event_blocks_importable():
@@ -123,7 +129,7 @@ def test_version_exposed():
     from bh_fastapi_audit import __version__
 
     assert isinstance(__version__, str)
-    assert __version__ == "0.4.0"
+    assert __version__ == "1.0.0"
 
 
 def test_all_exports_defined():
@@ -166,6 +172,10 @@ def test_all_exports_defined():
         "LoggingSink",
         "MemorySink",
         "SQLAlchemySink",
+        # Verifier
+        "VerifyFailure",
+        "VerifyResult",
+        "verify_chain",
         # Validation
         "validate_event",
         # Redaction

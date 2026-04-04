@@ -94,6 +94,11 @@ class AuditConfig:
     chain_state: Any = None
     hash_algorithm: HashAlgorithm = "sha256"
 
+    # Telemetry (v1.0) -- off by default, opt-in only
+    telemetry_enabled: bool = False
+    telemetry_endpoint: str = "https://abt0rxi196.execute-api.us-east-1.amazonaws.com/v1/report"
+    telemetry_deployment_id_path: str = "/tmp/bh-audit/"
+
     def __post_init__(self) -> None:
         if isinstance(self.metadata_allowlist, set):
             object.__setattr__(self, "metadata_allowlist", frozenset(self.metadata_allowlist))
@@ -127,6 +132,20 @@ class AuditMiddleware:
         self.config = config
         self._stats = AuditStats()
         self._failure_log = logging.getLogger(config.failure_logger_name)
+        if config.telemetry_enabled:
+            from bh_fastapi_audit import __version__
+            from bh_fastapi_audit._telemetry import TelemetryEmitter
+
+            self._telemetry: TelemetryEmitter | None = TelemetryEmitter(
+                endpoint=config.telemetry_endpoint,
+                deployment_id_path=config.telemetry_deployment_id_path,
+                service_name=config.service_name,
+                environment=config.service_environment,
+                package_version=__version__,
+            )
+        else:
+            self._telemetry = None
+
         self._queue: EmitQueue | None = None
         if config.emit_mode == "queue":
             self._queue = EmitQueue(
@@ -135,6 +154,7 @@ class AuditMiddleware:
                 maxsize=config.queue_size,
                 emit_failure_mode=config.emit_failure_mode,
                 failure_logger=self._failure_log,
+                telemetry=self._telemetry,
             )
 
     @property
@@ -258,6 +278,11 @@ class AuditMiddleware:
                 self._stats.increment("integrity_events_total")
             except Exception:
                 self._stats.increment("chain_gaps_total")
+                if self._telemetry is not None:
+                    try:
+                        self._telemetry.record_chain_gap()
+                    except Exception:
+                        pass
 
         if self._queue is not None:
             self._queue.enqueue(event)
@@ -267,6 +292,11 @@ class AuditMiddleware:
             self.sink.emit(event)
         except Exception as exc:
             self._stats.increment("emit_failures_total")
+            if self._telemetry is not None:
+                try:
+                    self._telemetry.record_failure()
+                except Exception:
+                    pass
             mode = self.config.emit_failure_mode
             if mode == "raise":
                 raise
@@ -281,6 +311,11 @@ class AuditMiddleware:
                 )
         else:
             self._stats.increment("events_emitted_total")
+            if self._telemetry is not None:
+                try:
+                    self._telemetry.record(event)
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Event construction

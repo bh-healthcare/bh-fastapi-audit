@@ -31,6 +31,8 @@ class EmitQueue:
             ``"log"`` inside the background task because there is no
             caller to propagate to.
         failure_logger: Logger instance for internal diagnostics.
+        telemetry: Optional ``TelemetryEmitter`` for accurate
+            post-emit tracking.
     """
 
     __slots__ = (
@@ -40,6 +42,7 @@ class EmitQueue:
         "_emit_failure_mode",
         "_failure_log",
         "_task",
+        "_telemetry",
     )
 
     def __init__(
@@ -50,6 +53,7 @@ class EmitQueue:
         maxsize: int = 10_000,
         emit_failure_mode: str = "log",
         failure_logger: logging.Logger | None = None,
+        telemetry: Any = None,
     ) -> None:
         self._sink = sink
         self._stats = stats
@@ -57,6 +61,7 @@ class EmitQueue:
         self._emit_failure_mode = emit_failure_mode
         self._failure_log = failure_logger or _log
         self._task: asyncio.Task[None] | None = None
+        self._telemetry = telemetry
 
     @property
     def pending(self) -> int:
@@ -115,6 +120,11 @@ class EmitQueue:
                 await loop.run_in_executor(None, self._sink.emit, event)
             except Exception as exc:
                 self._stats.increment("emit_failures_total")
+                if self._telemetry is not None:
+                    try:
+                        self._telemetry.record_failure()
+                    except Exception:
+                        pass
                 if self._emit_failure_mode in ("log", "raise"):
                     self._failure_log.warning(
                         "Audit sink emit failed: event_id=%s service=%s error=%s",
@@ -124,5 +134,10 @@ class EmitQueue:
                     )
             else:
                 self._stats.increment("events_emitted_total")
+                if self._telemetry is not None:
+                    try:
+                        self._telemetry.record(event)
+                    except Exception:
+                        pass
             finally:
                 self._queue.task_done()
