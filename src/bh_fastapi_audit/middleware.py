@@ -98,6 +98,11 @@ class AuditConfig:
     telemetry_enabled: bool = False
     telemetry_endpoint: str = "https://abt0rxi196.execute-api.us-east-1.amazonaws.com/v1/report"
     telemetry_deployment_id_path: str = "/tmp/bh-audit/"
+    telemetry_flush_interval_seconds: float = 300.0
+    telemetry_event_flush_threshold: int = 500
+    telemetry_log_level: int = logging.WARNING
+    telemetry_http_timeout_s: float = 1.5
+    telemetry_flush_stale_on_init: bool = True
 
     def __post_init__(self) -> None:
         if isinstance(self.metadata_allowlist, set):
@@ -142,6 +147,11 @@ class AuditMiddleware:
                 service_name=config.service_name,
                 environment=config.service_environment,
                 package_version=__version__,
+                flush_interval_seconds=config.telemetry_flush_interval_seconds,
+                event_flush_threshold=config.telemetry_event_flush_threshold,
+                log_level=config.telemetry_log_level,
+                http_timeout_s=config.telemetry_http_timeout_s,
+                flush_stale_on_init=config.telemetry_flush_stale_on_init,
             )
         else:
             self._telemetry = None
@@ -163,9 +173,11 @@ class AuditMiddleware:
         return self._stats
 
     async def shutdown(self) -> None:
-        """Drain the async emit queue (call on app shutdown)."""
+        """Drain the async emit queue and flush telemetry (call on app shutdown)."""
         if self._queue is not None:
             await self._queue.shutdown(timeout=self.config.queue_drain_timeout)
+        if self._telemetry is not None:
+            self._telemetry.flush()
 
     # ------------------------------------------------------------------
     # ASGI entry point

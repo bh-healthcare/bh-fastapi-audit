@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-13
+
+### Changed
+
+- **Lambda-safe telemetry** — telemetry system rewritten for ephemeral/serverless
+  environments.  Dual-trigger flush (interval **or** event threshold, whichever comes
+  first, default 300s / 500 events).  Mid-request flushes use a fire-and-forget daemon
+  thread (zero added latency).  Disk-backed counter persistence survives cold starts.
+  `AuditMiddleware.shutdown()` now flushes telemetry (blocking, bounded by
+  `telemetry_http_timeout_s`).  Failure logging raised from `DEBUG` to configurable
+  `telemetry_log_level` (default `WARNING`).
+- Five new `AuditConfig` fields: `telemetry_flush_interval_seconds`,
+  `telemetry_event_flush_threshold`, `telemetry_log_level`,
+  `telemetry_http_timeout_s`, `telemetry_flush_stale_on_init`.
+- Updated `docs/telemetry.md` with Lambda configuration section and cold-start
+  latency guidance.
+
+### Fixed
+
+- **Telemetry payload format** — telemetry report now uses `"schema": "bh-telemetry-v1"`
+  and nested `"period": {"start": ..., "end": ...}` to match the receiver Lambda API.
+  The v1.0.0 format was silently rejected with HTTP 400; telemetry was never actually
+  delivered.
+
 ## [1.0.0] - 2026-04-04
 
 ### Added
@@ -357,6 +381,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Apache 2.0 license
 - Vendored bh-audit-schema v1.0 JSON schema
 
+[1.1.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bh-healthcare/bh-fastapi-audit/compare/v0.2.2...v0.3.0
