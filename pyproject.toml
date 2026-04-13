@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bh-fastapi-audit"
-version = "1.0.0"
+version = "1.1.0"
 description = "FastAPI ASGI middleware for emitting PHI-safe audit events for behavioral healthcare systems"
 readme = "README.md"
 license = "Apache-2.0"

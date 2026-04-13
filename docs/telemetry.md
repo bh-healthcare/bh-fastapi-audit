@@ -19,7 +19,7 @@ config = AuditConfig(
 
 ## What is sent
 
-A single JSON report per deployment, per week (Sunday-to-Sunday):
+A single JSON report per deployment, per flush interval:
 
 ```json
 {
@@ -29,8 +29,8 @@ A single JSON report per deployment, per week (Sunday-to-Sunday):
   "environment": "production",
   "package": "bh-fastapi-audit",
   "package_version": "1.0.0",
-  "period_start": "2026-03-29T00:00:00+00:00",
-  "period_end": "2026-04-05T00:00:00+00:00",
+  "period_start": "2026-04-13T00:00:00+00:00",
+  "period_end": "2026-04-13T00:05:00+00:00",
   "counters": {
     "events_emitted": 12847,
     "by_action_type": {"READ": 8021, "CREATE": 3102, "UPDATE": 1724},
@@ -56,23 +56,94 @@ A single JSON report per deployment, per week (Sunday-to-Sunday):
 
 1. On each request, after the audit event is emitted, counters are incremented
    in-memory (thread-safe).
-2. On each call, the current UTC time is compared to the period boundary.
-3. When the period boundary is crossed, the report is POSTed via `urllib.request`
-   with a 5-second timeout.
-4. Counters are reset after successful emission.
-5. **No background threads** -- this works in Lambda and single-process environments.
+2. A flush triggers when **either** `telemetry_flush_interval_seconds` (default 300s)
+   has elapsed **or** `telemetry_event_flush_threshold` (default 500) events have
+   accumulated — whichever comes first.
+3. Mid-request flushes use a **fire-and-forget daemon thread** so `record()` adds
+   zero latency to the request path.  Only one flush runs at a time (protected by a
+   lock; concurrent triggers are skipped).
+4. Counters are checkpointed to disk every `max(50, threshold // 10)` events so data
+   survives process restarts.
+5. On success, counters are reset and the disk state is cleared. On failure, the
+   snapshot is persisted to disk for recovery on the next cold start.
+6. `AuditMiddleware.shutdown()` calls `flush()` (blocking, bounded by
+   `telemetry_http_timeout_s`) to guarantee a delivery attempt before the process exits.
+
+## Configuration fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `telemetry_enabled` | `bool` | `False` | Master switch — nothing is sent or written when `False` |
+| `telemetry_endpoint` | `str` | `"https://…/v1/report"` | Telemetry receiver URL |
+| `telemetry_deployment_id_path` | `str` | `"/tmp/bh-audit/"` | Directory for deployment ID and state files |
+| `telemetry_flush_interval_seconds` | `float` | `300.0` | Flush after this many seconds elapsed |
+| `telemetry_event_flush_threshold` | `int` | `500` | Also flush when this many events accumulate |
+| `telemetry_log_level` | `int` | `logging.WARNING` | Log level for emission failures |
+| `telemetry_http_timeout_s` | `float` | `1.5` | Max seconds for the HTTP POST |
+| `telemetry_flush_stale_on_init` | `bool` | `True` | Flush stale disk state on cold start (see below) |
+
+## Lambda / serverless configuration
+
+The default settings work on Lambda and ephemeral infrastructure.  The dual-trigger
+flush (time + event count) and disk-backed persistence solve the fundamental problem
+of short-lived processes that never survive a weekly boundary.
+
+### Recommended Lambda setup
+
+```python
+config = AuditConfig(
+    service_name="intake-api",
+    telemetry_enabled=True,
+    # Defaults are Lambda-friendly:
+    # telemetry_flush_interval_seconds=300.0,  # 5 minutes
+    # telemetry_event_flush_threshold=500,
+    # telemetry_http_timeout_s=1.5,
+    # telemetry_flush_stale_on_init=True,
+)
+```
+
+### Cold-start latency penalty
+
+When `telemetry_flush_stale_on_init=True` (default), a cold start that finds a
+stale state file from a previous container will perform a **blocking** HTTP POST
+(bounded by `telemetry_http_timeout_s`, default 1.5s) in `__init__`.  This recovers
+data from the previous container's counters.
+
+If cold-start latency is more important than recovering stale telemetry, set
+`telemetry_flush_stale_on_init=False` — the stale data will be discarded.
+
+### Shutdown handler
+
+Wire `AuditMiddleware.shutdown()` into your ASGI lifespan for a final flush:
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await audit_middleware.shutdown()  # drains queue + flushes telemetry
+```
+
+## Disk state
+
+Two files are written to `telemetry_deployment_id_path` (default `/tmp/bh-audit/`):
+
+- `.bh-audit-deployment-id` — anonymous UUID, persisted across restarts
+- `.bh-audit-telemetry-state.json` — counter checkpoint with `state_schema_version: 1`
+
+Both are created only when `telemetry_enabled=True`.  When `telemetry_enabled=False`,
+no files are read or written.
 
 ## Deployment ID
 
 An anonymous UUID is generated on first run and persisted to
 `<telemetry_deployment_id_path>/.bh-audit-deployment-id`. This allows correlating
-weekly reports from the same deployment without identifying the operator.
+reports from the same deployment without identifying the operator.
 
 ## Failure behaviour
 
 If the HTTP POST fails (network error, timeout, non-200 response), the failure is
-silently swallowed. A `DEBUG`-level log message is emitted to the `bh.audit.telemetry`
-logger. Counters are **not** reset on failure, so the data rolls into the next period.
+logged at `telemetry_log_level` (default `WARNING`).  The counter snapshot is
+persisted to disk for recovery on the next cold start.
 
 Telemetry never raises exceptions and never affects application behaviour.
 

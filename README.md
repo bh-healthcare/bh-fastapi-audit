@@ -15,7 +15,7 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v1.0.0** — Verifier CLI, opt-in telemetry, chain hashing, DynamoDB sink, runtime validation, DENIED outcome with denial callbacks, schema negotiation.
+**Current version: v1.1.0** — Lambda-safe telemetry, Verifier CLI, chain hashing, DynamoDB sink, runtime validation, DENIED outcome with denial callbacks, schema negotiation.
 
 ### v1.0 (current)
 - **Verifier CLI** — `bh-audit verify` for chain integrity verification (file or DynamoDB source, human or JSON output)
@@ -308,7 +308,12 @@ See [docs/migrating-1.0-to-1.1.md](docs/migrating-1.0-to-1.1.md) for a full migr
 | `hash_algorithm` | `"sha256"` | Hash algorithm for chain hashing (`"sha256"`, `"sha384"`, `"sha512"`) |
 | `telemetry_enabled` | `False` | Enable opt-in anonymous telemetry |
 | `telemetry_endpoint` | `"https://…/v1/report"` | Telemetry receiver URL |
-| `telemetry_deployment_id_path` | `"/tmp/bh-audit/"` | Directory for anonymous deployment ID file |
+| `telemetry_deployment_id_path` | `"/tmp/bh-audit/"` | Directory for deployment ID and state files |
+| `telemetry_flush_interval_seconds` | `300.0` | Flush after this many seconds elapsed |
+| `telemetry_event_flush_threshold` | `500` | Also flush when this many events accumulate |
+| `telemetry_log_level` | `logging.WARNING` | Log level for telemetry emission failures |
+| `telemetry_http_timeout_s` | `1.5` | Max seconds for the telemetry HTTP POST |
+| `telemetry_flush_stale_on_init` | `True` | Flush stale disk state on cold start |
 
 ## PHI-safe defaults
 
