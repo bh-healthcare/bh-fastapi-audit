@@ -1,5 +1,7 @@
 # bh-fastapi-audit
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/bh-fastapi-audit?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/bh-fastapi-audit)
+
 Pure ASGI middleware for emitting PHI-safe audit events for behavioral healthcare systems, designed for teams building modern healthcare APIs.
 
 This project emits audit events conforming to the **bh-audit-schema** standard (v1.1):  
