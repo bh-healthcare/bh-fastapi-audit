@@ -5,7 +5,7 @@ This package provides pure ASGI middleware for emitting structured audit events
 conforming to the bh-audit-schema v1.1 standard for behavioral healthcare systems.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 from bh_fastapi_audit._chain import canonical_serialize, compute_chain_hash
 from bh_fastapi_audit._chain_state import ChainState

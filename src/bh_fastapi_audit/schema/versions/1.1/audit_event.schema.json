@@ -4,6 +4,23 @@
   "title": "BH Audit Event",
   "type": "object",
   "additionalProperties": false,
+  "$defs": {
+    "ActionType": {
+      "type": "string",
+      "enum": ["READ", "CREATE", "UPDATE", "DELETE", "EXPORT", "LOGIN", "LOGOUT", "PRINT", "OTHER"],
+      "description": "Canonical action taxonomy for BH audit events."
+    },
+    "OutcomeStatus": {
+      "type": "string",
+      "enum": ["SUCCESS", "FAILURE", "DENIED"],
+      "description": "Terminal outcome classification for an audited action."
+    },
+    "DataClassification": {
+      "type": "string",
+      "enum": ["PHI", "PII", "NONE", "UNKNOWN"],
+      "description": "Regulatory classification of the data touched by the action."
+    }
+  },
   "required": [
     "schema_version",
     "event_id",
@@ -88,10 +105,7 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["READ", "CREATE", "UPDATE", "DELETE", "EXPORT", "LOGIN", "LOGOUT", "PRINT", "OTHER"]
-        },
+        "type": { "$ref": "#/$defs/ActionType" },
         "name": {
           "type": "string",
           "maxLength": 128,
@@ -102,8 +116,7 @@
           "description": "True if the action touches regulated PHI (behavioral health context)."
         },
         "data_classification": {
-          "type": "string",
-          "enum": ["PHI", "PII", "NONE", "UNKNOWN"],
+          "$ref": "#/$defs/DataClassification",
           "default": "UNKNOWN"
         }
       }
@@ -147,7 +160,7 @@
       "additionalProperties": false,
       "required": ["status"],
       "properties": {
-        "status": { "type": "string", "enum": ["SUCCESS", "FAILURE", "DENIED"] },
+        "status": { "$ref": "#/$defs/OutcomeStatus" },
         "error_type": { "type": "string", "minLength": 1, "maxLength": 128 },
         "error_message": {
           "type": "string",
