@@ -17,7 +17,7 @@ The goal of this library is to make consistent, structured audit trails easy to 
 
 This project is an implementation layer that turns the bh-audit-schema standard into working FastAPI middleware.
 
-**Current version: v1.1.0** — Lambda-safe telemetry, Verifier CLI, chain hashing, DynamoDB sink, runtime validation, DENIED outcome with denial callbacks, schema negotiation.
+**Current version: v1.1.1** — Lambda-safe telemetry, Verifier CLI, chain hashing, DynamoDB sink, runtime validation, DENIED outcome with denial callbacks, schema negotiation. Vendored schema uses `$defs` for enum types.
 
 ### v1.0 (current)
 - **Verifier CLI** — `bh-audit verify` for chain integrity verification (file or DynamoDB source, human or JSON output)
@@ -52,7 +52,10 @@ This project is an implementation layer that turns the bh-audit-schema standard 
   - `SQLAlchemySink` — relational database storage (Postgres, SQLite, etc., via SQLAlchemy Core)
 - Redaction utilities for error message sanitization
 
-The bh-audit-schema v1.0 and v1.1 JSON schemas are vendored into this package to enable offline validation.
+The bh-audit-schema v1.0 and v1.1 JSON schemas are vendored into this package to
+enable offline validation. The vendored v1.1 schema currently tracks **bh-audit-schema
+v1.1.2**, which defines `ActionType`, `OutcomeStatus`, and `DataClassification` as
+named `$defs` referenced via `$ref` (accepted values unchanged).
 
 ## Quickstart
 
